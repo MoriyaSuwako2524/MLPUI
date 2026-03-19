@@ -278,11 +278,6 @@ class TensorNet(nn.Module):
 
 
 class TensorEmbedding(nn.Module):
-    """Tensor embedding layer.
-
-    :meta private:
-    """
-
     def __init__(
         self,
         hidden_channels,
