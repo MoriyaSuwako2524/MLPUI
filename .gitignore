@@ -1,0 +1,6 @@
+.idea/
+*.pyc
+__pycache__/
+*.xml
+.ipynb_checkpoints
+*.iml
