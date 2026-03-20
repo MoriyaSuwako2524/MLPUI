@@ -1,13 +1,17 @@
-# chemlab/config/config_loader.py
-
 import yaml
 from pathlib import Path
 
 
-CONFIG_DIR = Path(__file__).resolve().parent
+import os
+
+_DEFAULT_CONFIG_DIR = Path(__file__).resolve().parent.parent / "configs"
+CONFIG_DIR = Path(os.environ.get("CHEMLAB_CONFIG_DIR", _DEFAULT_CONFIG_DIR))
 
 _INTERNAL_KEYS = frozenset({"use_defaults"})
 
+
+_DEFAULT_CONFIG_DIR = Path(__file__).resolve().parent.parent / "configs"
+CONFIG_DIR = Path(os.environ.get("CHEMLAB_CONFIG_DIR", _DEFAULT_CONFIG_DIR))
 
 class ConfigBase:
     _cache: dict[str, dict] = {}   # filename → loaded data
@@ -19,10 +23,18 @@ class ConfigBase:
         """Load and cache a YAML file relative to CONFIG_DIR."""
         if filename not in cls._cache:
             path = CONFIG_DIR / filename
+            if not path.exists():
+                raise FileNotFoundError(
+                    f"Config file not found: {path}\n"
+                    f"CONFIG_DIR is set to: {CONFIG_DIR}"
+                )
             with open(path, "r", encoding="utf-8") as f:
                 cls._cache[filename] = yaml.safe_load(f) or {}
         return cls._cache[filename]
 
+    @classmethod
+    def clear_cache(cls):
+        cls._cache.clear()
     @classmethod
     def _load_path(cls, path: Path) -> dict:
         """Load an arbitrary YAML path (no caching — used for runtime overrides)."""

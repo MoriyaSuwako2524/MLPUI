@@ -65,7 +65,7 @@ def discover_scripts():
     scripts = []
 
     for _, modname, _ in pkgutil.walk_packages(
-        chemlab.scripts.__path__, chemlab.scripts.__name__ + "."
+        scripts.__path__, scripts.__name__ + "."
     ):
         module = importlib.import_module(modname)
 
