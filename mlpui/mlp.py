@@ -1,8 +1,8 @@
 from mlpui.model_loader import load_torch_file
-
-
-
-
+from mlpui.utils import calculate_parameters,_weight_dtype
+from model_managegment import get_torch_device
+from model_detection import unet_prefix_from_state_dict,model_config_from_unet
+import logging
 
 def load_checkpoint_guess_config(ckpt_path, output_vae=True, output_clip=True, output_clipvision=False, embedding_directory=None, output_model=True, model_options={}, te_model_options={}, disable_dynamic=False):
     # TODO: Modify this function to load mlp state dict
@@ -26,16 +26,13 @@ def load_state_dict_guess_config(sd, output_vae=True, output_clip=True, output_c
     model = None
     model_patcher = None
 
-    diffusion_model_prefix = model_detection.unet_prefix_from_state_dict(sd)
-    parameters = comfy.utils.calculate_parameters(sd, diffusion_model_prefix)
-    weight_dtype = comfy.utils.weight_dtype(sd, diffusion_model_prefix)
-    load_device = model_management.get_torch_device()
+    mlp_model_prefix = unet_prefix_from_state_dict(sd)
+    parameters = calculate_parameters(sd, mlp_model_prefix)
+    weight_dtype = _weight_dtype(sd, mlp_model_prefix)
+    load_device = get_torch_device()
 
-    custom_operations = model_options.get("custom_operations", None)
-    if custom_operations is None:
-        sd, metadata = comfy.utils.convert_old_quants(sd, diffusion_model_prefix, metadata=metadata)
 
-    model_config = model_detection.model_config_from_unet(sd, diffusion_model_prefix, metadata=metadata)
+    model_config = model_config_from_unet(sd, mlp_model_prefix, metadata=metadata)
     if model_config is None:
         logging.warning("Warning, This is not a checkpoint file, trying to load it as a diffusion model only.")
         diffusion_model = load_diffusion_model_state_dict(sd, model_options={})
@@ -118,3 +115,4 @@ def load_state_dict_guess_config(sd, output_vae=True, output_clip=True, output_c
             model_management.load_models_gpu([model_patcher], force_full_load=True)
 
     return (model_patcher, clip, vae, clipvision)
+
