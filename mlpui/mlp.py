@@ -1,4 +1,4 @@
-from mlpui.models.model_loader import load_torch_file
+from mlpui.model_loader import load_torch_file
 
 
 
