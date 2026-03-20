@@ -4,14 +4,11 @@ from pathlib import Path
 
 import os
 
-_DEFAULT_CONFIG_DIR = Path(__file__).resolve().parent.parent / "configs"
+_DEFAULT_CONFIG_DIR = Path(__file__).resolve().parent.parent.parent / "configs"
 CONFIG_DIR = Path(os.environ.get("CHEMLAB_CONFIG_DIR", _DEFAULT_CONFIG_DIR))
 
 _INTERNAL_KEYS = frozenset({"use_defaults"})
 
-
-_DEFAULT_CONFIG_DIR = Path(__file__).resolve().parent.parent / "configs"
-CONFIG_DIR = Path(os.environ.get("CHEMLAB_CONFIG_DIR", _DEFAULT_CONFIG_DIR))
 
 class ConfigBase:
     _cache: dict[str, dict] = {}   # filename → loaded data

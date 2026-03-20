@@ -1,2 +1,4 @@
-mmap_torch_files: false
+mmap_torch_files: true
 disable_mmap: false
+safe_globals:
+  - "fairchem.core.units.mlip_unit.api.inference.MLIPInferenceCheckpoint"
