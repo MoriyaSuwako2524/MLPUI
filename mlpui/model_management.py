@@ -1,9 +1,6 @@
-
-
-
 import torch
 from enum import Enum,auto
-
+from scripts.config.config_loader import ConfigBase
 class VRAMState(Enum):
     DISABLED = 0    #No vram present: no need to move models to vram
     NO_VRAM = 1     #Very low vram: enable all the options to save vram
@@ -20,7 +17,23 @@ class CPUState(Enum):
 
 vram_state = VRAMState.NORMAL_VRAM
 set_vram_to = VRAMState.NORMAL_VRAM
-cpu_state = CPUState.GPU
+
+
+class ModelManagementConfig(ConfigBase):
+    yaml_file = "model_management.yaml"
+
+_cfg = ModelManagementConfig()
+directml_enabled = _cfg.directml_enabled
+xpu_available = _cfg.xpu_available
+npu_available = _cfg.npu_available
+mlu_available = _cfg.mlu_available
+cpu = _cfg.cpu
+
+if cpu:
+    cpu_state = CPUState.CPU
+else:
+    cpu_state = CPUState.GPU
+
 
 
 def is_intel_xpu():
@@ -63,3 +76,19 @@ def get_torch_device():
             return torch.device("mlu", torch.mlu.current_device())
         else:
             return torch.device(torch.cuda.current_device())
+
+
+
+def unet_dtype(device=None, model_params=0, supported_dtypes=[torch.float32], weight_dtype=None):
+    if model_params < 0:
+        model_params = 1000000000000000000000
+
+    return torch.float32
+
+
+def unet_manual_cast(weight_dtype, inference_device, supported_dtypes=[torch.float32]):
+    if weight_dtype == torch.float32 or weight_dtype == torch.float64:
+        return None
+
+
+    return torch.float32

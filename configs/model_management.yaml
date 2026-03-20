@@ -1,0 +1,5 @@
+directml_enabled: false
+xpu_available: false
+npu_available: false
+mlu_available: false
+cpu: true

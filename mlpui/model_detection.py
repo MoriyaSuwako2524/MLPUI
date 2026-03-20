@@ -1,6 +1,6 @@
 
-
-
+import mlpui.supported_models as supported_models
+import logging
 
 
 
@@ -39,12 +39,12 @@ def count_blocks(state_dict_keys, prefix_string):
         count += 1
     return count
 
-def model_config_from_unet(state_dict, key_prefix):
+def detect_unet_config(state_dict, key_prefix,metadata=None):
     keys = list(state_dict.keys())
     if "{}blocks.0.edge_wise.so2_conv_1.fc_m0.weights".format(key_prefix) in keys:
 
         mlp_config = {}
-        mlp_config["model_type"] = "uma"
+        mlp_config["model_name"] = "uma"
         mlp_config["num_blocks"] = count_blocks(keys, "{}blocks.{}".format(key_prefix, "{}"))
         mlp_config["has_mole"] = "{}routing_mlp.0.weight".format(key_prefix) in keys
         mlp_config["datasets"] = [
@@ -55,3 +55,25 @@ def model_config_from_unet(state_dict, key_prefix):
         return mlp_config
 
     return None
+
+
+def model_config_from_unet_config(unet_config, state_dict=None):
+    for model_config in supported_models.models:
+        if model_config.matches(unet_config, state_dict):
+            return model_config(unet_config)
+
+    logging.error("no match {}".format(unet_config))
+    return None
+
+def model_config_from_unet(state_dict, unet_key_prefix, use_base_if_no_match=False, metadata=None):
+    unet_config = detect_unet_config(state_dict, unet_key_prefix, metadata=metadata)
+    if unet_config is None:
+        return None
+
+
+    model_config = model_config_from_unet_config(unet_config, state_dict)
+
+    if model_config is None and use_base_if_no_match:
+        model_config = supported_models.BASE(unet_config)
+
+    return model_config
