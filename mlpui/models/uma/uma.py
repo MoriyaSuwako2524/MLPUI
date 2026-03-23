@@ -18,8 +18,42 @@ from mlpui.models.nn.embedding import (
 from mlpui.models.nn.radial import GaussianSmearing, PolynomialEnvelope
 from mlpui.models.nn.so3_layers import SO3_Linear
 from .escn_md_block import eSCNMD_Block
+from mlpui.models.nn.layer_norm import (
+    EquivariantLayerNormArray,
+    EquivariantLayerNormArraySphericalHarmonics,
+    EquivariantRMSNormArraySphericalHarmonics,
+    EquivariantRMSNormArraySphericalHarmonicsV2,
+    get_normalization_layer,
+)
+from torch.profiler import record_function
+from mlpui.models.common.quaternion.quaternion_wigner_utils import (
+    create_wigner_data_module,
+)
+from mlpui.models.common.quaternion.wigner_d_hybrid import (
+    axis_angle_wigner_hybrid,
+)
+from mlpui.models.common.rotation import (
+    eulers_to_wigner,
+    init_edge_rot_euler_angles,
+)
 
 
+from ase import Atoms
+
+from mlpui.models.common.atomic_data import AtomicData
+from mlpui.models.uma.inference import InferenceSettings
+from mlpui.models.common.utils import conditional_grad
+from mlpui.models.uma.inference import (
+    CHARGE_RANGE,
+    DEFAULT_CHARGE,
+    DEFAULT_SPIN,
+    DEFAULT_SPIN_OMOL,
+    SPIN_RANGE,
+    UMATask,
+)
+from mlpui.models.common import gp_utils
+from torch.distributed.nn.functional import all_reduce as all_reduce_with_grad
+from mlpui.models.common.compute import generate_graph
 
 class eSCNMDBackbone(nn.Module, MOLEInterface):
     def __init__(
@@ -900,41 +934,104 @@ def resolve_dataset_mapping(
 
 
 
-def create_wigner_data_module(
-    lmax: int,
-    lmin: int = 5,
-) -> WignerDataModule:
-    """
-    Create a WignerDataModule with precomputed coefficients and U blocks.
 
-    This creates an nn.Module that holds all precomputed Wigner D data,
-    which can be registered as a submodule and will automatically move
-    with the parent model via .to(device).
-
-    The module is created on CPU with float64 precision. When the parent
-    model is moved to a device or dtype, the buffers will be converted
-    automatically.
+@torch.compiler.disable
+def get_balanced_attribute(
+    emb: torch.Tensor,
+    target_sum: torch.Tensor,
+    natoms: torch.Tensor,
+    batch: torch.Tensor,
+    balance_attribute_offset: float = 0,
+    balance_channel_idx: int = 0,
+) -> torch.Tensor:
+    """Balance per-atom attributes (charge/spin) to sum to system target.
 
     Args:
-        lmax: Maximum angular momentum
-        lmin: Minimum angular momentum for Ra/Rb polynomial path (default 5,
-              matching hybrid method which uses custom kernels for l=0..4)
+        emb: Node embeddings of shape [num_atoms, sph_features, channels]
+        target_sum: Target sum per system of shape [num_systems]
+        natoms: Number of atoms per system of shape [num_systems]
+        batch: Batch indices mapping atoms to systems of shape [num_atoms]
+        balance_attribute_offset: Offset to subtract from target (e.g., 1 for spin)
+        balance_channel_idx: Which channel index to balance
 
     Returns:
-        WignerDataModule containing coefficients and U_blocks
+        Modified embeddings with the specified channel balanced to sum to target.
+
+    Supports graph parallel (GP) mode using torch.distributed.nn.functional.all_reduce
+    which provides correct gradients in both forward and backward passes.
     """
-    # Create on CPU with float64 (will be converted when model moves)
-    dtype = torch.float64
-    device = torch.device("cpu")
+    out_emb = emb.clone()
 
-    coeffs = precompute_wigner_coefficients(lmax, dtype=dtype, device=device, lmin=lmin)
-    full_U_blocks_real = precompute_U_blocks_euler_aligned_real(
-        lmax, dtype=dtype, device=device
-    )
-    U_blocks = full_U_blocks_real[lmin:]
+    charge_unbalanced = emb[:, 0, balance_channel_idx]
 
-    return WignerDataModule(
-        coeffs=coeffs,
-        U_blocks=U_blocks,
-        custom_kernels=CustomKernelModule(),
+    system_scalars_part = torch.zeros(
+        len(natoms),
+        device=emb.device,
+        dtype=emb.dtype,
     )
+
+    system_scalars_part.index_add_(0, batch, charge_unbalanced.view(-1))
+
+    # Reduce partial sums across all graph parallel ranks
+    # Use all_reduce_with_grad which has all_reduce in both forward AND backward,
+    # ensuring correct gradient computation when atoms are split across ranks.
+    if gp_utils.initialized():
+        system_scalar = all_reduce_with_grad(
+            system_scalars_part, group=gp_utils.get_gp_group()
+        )
+    else:
+        system_scalar = system_scalars_part
+
+    correction = (system_scalar - (target_sum - balance_attribute_offset)) / natoms
+
+    balanced_node_scalar = charge_unbalanced - correction[batch]
+
+    out_emb[:, 0, balance_channel_idx] = (
+        out_emb[:, 0, balance_channel_idx] * 0 + balanced_node_scalar
+    )
+
+    return out_emb
+
+
+def add_n_empty_edges(
+    graph_dict: dict, edges_to_add: int, cutoff: float, node_offset: int = 0
+):
+    graph_dict["edge_index"] = torch.cat(
+        (
+            graph_dict["edge_index"].new_ones(2, edges_to_add) * node_offset,
+            graph_dict["edge_index"],
+        ),
+        dim=1,
+    )
+
+    self_edge_distance_vec = graph_dict["edge_distance_vec"].new_ones(1, 3) + cutoff
+    graph_dict["edge_distance_vec"] = torch.cat(
+        (
+            self_edge_distance_vec.expand(edges_to_add, 3),
+            graph_dict["edge_distance_vec"],
+        ),
+        dim=0,
+    )
+
+    edge_distance = torch.linalg.norm(self_edge_distance_vec, dim=-1, keepdim=False)
+    graph_dict["edge_distance"] = torch.cat(
+        (edge_distance.expand(edges_to_add), graph_dict["edge_distance"]), dim=0
+    )
+
+@torch.compiler.disable
+def pad_edges(graph_dict, edge_chunk_size: int, cutoff: float, node_offset: int = 0):
+    n_edges = n_edges_post = graph_dict["edge_index"].shape[1]
+
+    if edge_chunk_size > 0 and n_edges_post % edge_chunk_size != 0:
+        # make sure we have a multiple of self.edge_chunk_size edges
+        n_edges_post += edge_chunk_size - n_edges_post % edge_chunk_size
+
+    n_edges_post = max(n_edges_post, 1)  # at least 1 edge to avoid empty "edge" case
+    if n_edges_post > n_edges:
+        # We append synthetic padding edges whose distance vector has norm > cutoff
+        # (see add_n_empty_edges where distance_vec is set to 1+cutoff). The radial
+        # polynomial envelope returns 0 for distances >= cutoff, so these edges never
+        # contribute to embeddings or message passing; they only ensure the edge count
+        # is a multiple of edge_chunk_size (or at least one edge), aiding chunked
+        # activation checkpointing and avoiding empty tensor edge cases.
+        add_n_empty_edges(graph_dict, n_edges_post - n_edges, cutoff, node_offset)

@@ -5,7 +5,7 @@ import logging
 import mlpui.supported_models as supported_models
 import mlpui.models.uma.uma as uma
 import mlpui.model_management as model_management
-
+import inspect
 class ModelType(Enum):
     #TODO: Shift to GNN type?
     EPS = 1
@@ -23,7 +23,7 @@ class ModelType(Enum):
 
 
 class BaseModel(torch.nn.Module):
-    def __init__(self, model_config, model_type=ModelType.EPS, device=None, unet_model=uma.UMA):
+    def __init__(self, model_config, model_type=ModelType.EPS, device=None, unet_model=uma.eSCNMDBackbone):
         super().__init__()
 
         unet_config = model_config.unet_config
@@ -34,7 +34,20 @@ class BaseModel(torch.nn.Module):
         self.current_patcher: 'ModelPatcher' = None
 
         if not unet_config.get("disable_unet_model_creation", False):
-            self.diffusion_model = unet_model(**unet_config, device=device)
+            sig = inspect.signature(unet_model.__init__)
+            valid_params = set(sig.parameters.keys()) - {'self'}
+
+            has_var_keyword = any(
+                p.kind == inspect.Parameter.VAR_KEYWORD
+                for p in sig.parameters.values()
+            )
+
+            if has_var_keyword:
+                filtered_config = unet_config
+            else:
+                filtered_config = {k: v for k, v in unet_config.items() if k in valid_params}
+
+            self.diffusion_model = unet_model(**filtered_config)
             self.diffusion_model.eval()
             logging.info("model weight dtype {}, manual cast: {}".format(self.get_dtype(), self.manual_cast_dtype))
             model_management.archive_model_dtypes(self.diffusion_model)
@@ -54,5 +67,5 @@ class BaseModel(torch.nn.Module):
 
 class UMA(BaseModel):
     def __init__(self, model_config, model_type=ModelType.V_PREDICTION, device=None):
-        super().__init__(model_config, model_type, device=device, unet_model=uma.UMA)
+        super().__init__(model_config, model_type, device=device, unet_model=uma.eSCNMDBackbone)
 

@@ -13,13 +13,13 @@ from contextlib import suppress
 import torch
 import torch.nn as nn
 
-from fairchem.core.models.uma.nn.mole import (
+from mlpui.models.nn.mole import (
     MOLE,
     MOLEDGL,
     MOLEGlobals,
     norm_str_to_fn,
 )
-from fairchem.core.models.uma.nn.so2_layers import SO2_Convolution
+from mlpui.models.nn.so2_layers import SO2_Convolution
 
 fairchem_cpp_found = False
 with suppress(ModuleNotFoundError):

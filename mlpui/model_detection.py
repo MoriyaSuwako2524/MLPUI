@@ -47,11 +47,15 @@ def detect_unet_config(state_dict, key_prefix,metadata=None):
         mlp_config["model_name"] = "uma"
         mlp_config["num_blocks"] = count_blocks(keys, "{}blocks.{}".format(key_prefix, "{}"))
         mlp_config["has_mole"] = "{}routing_mlp.0.weight".format(key_prefix) in keys
-        mlp_config["datasets"] = [
-            k.split(".")[-2]  # omol, omat, odac ...
+
+        datasets = [
+            k.split(".")[-2]
             for k in keys
             if "dataset_emb_dict" in k and k.endswith(".weight")
         ]
+        if datasets:
+            mlp_config["dataset_mapping"] = {name: name for name in datasets}
+            mlp_config["use_dataset_embedding"] = True
         return mlp_config
 
     return None
