@@ -3,3 +3,5 @@ xpu_available: false
 npu_available: false
 mlu_available: false
 cpu: true
+disable_smart_memory: false
+aimdo_enabled: false

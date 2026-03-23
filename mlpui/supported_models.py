@@ -60,20 +60,11 @@ class BASE:
         return None
 
 class UMA(BASE):
-    unet_config = {
-        "model_name": "uma",
-        "num_blocks": 4,
-        "use_linear_in_transformer": False,
-        "adm_in_channels": None,
-        "use_temporal_attention": False,
-    }
-
-    unet_extra_config = {
-        "num_heads": 8,
-        "num_head_channels": -1,
-    }
-
-    memory_usage_factor = 1.0
+    def get_model(self, state_dict, prefix="", device=None):
+        logging.info("Loading UMA model")
+        import mlpui.model_base as model_base
+        out = model_base.UMA(self, device=device)
+        return out
 
 
 
