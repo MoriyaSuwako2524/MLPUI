@@ -185,6 +185,11 @@ def dtype_size(dtype):
     return dtype_size
 
 
+def unet_offload_device():
+    if vram_state == VRAMState.HIGH_VRAM:
+        return get_torch_device()
+    else:
+        return torch.device("cpu")
 
 def archive_model_dtypes(model):
     for name, module in model.named_modules():

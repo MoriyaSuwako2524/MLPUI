@@ -4,7 +4,7 @@ import mlpui.model_management as model_management
 from model_detection import unet_prefix_from_state_dict,model_config_from_unet
 import logging
 import torch
-
+import mlpui.model_patcher
 def load_checkpoint_guess_config(ckpt_path,  output_model=True, model_options={}, disable_dynamic=False):
     # TODO: Modify this function to load mlp state dict
     sd, metadata = load_torch_file(ckpt_path, return_metadata=True)
@@ -46,7 +46,7 @@ def load_state_dict_guess_config(sd, output_model=True, model_options={}, metada
     if output_model:
         inital_load_device = model_management.unet_inital_load_device(parameters, unet_dtype)
         model = model_config.get_model(sd, mlp_model_prefix, device=inital_load_device)
-        ModelPatcher = comfy.model_patcher.ModelPatcher if disable_dynamic else comfy.model_patcher.CoreModelPatcher
+        ModelPatcher = model_patcher.ModelPatcher if disable_dynamic else model_patcher.CoreModelPatcher
         model_patcher = ModelPatcher(model, load_device=load_device, offload_device=model_management.unet_offload_device())
         model.load_model_weights(sd, mlp_model_prefix, assign=model_patcher.is_dynamic())
 
