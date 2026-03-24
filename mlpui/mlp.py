@@ -5,20 +5,50 @@ from model_detection import unet_prefix_from_state_dict,model_config_from_unet
 import logging
 import torch
 import mlpui.model_patcher
+import os
+import yaml
+
+def load_checkpoint(config_path=None, ckpt_path=None, output_vae=True, output_clip=True, embedding_directory=None, state_dict=None, config=None):
+    logging.warning("Warning: The load checkpoint with config function is deprecated and will eventually be removed, please use the other one.")
+    model = load_checkpoint_guess_config(ckpt_path, embedding_directory=embedding_directory, output_model=True)
+    #TODO: this function is a mess and should be removed eventually
+    if config is None:
+        with open(config_path, 'r') as stream:
+            config = yaml.safe_load(stream)
+    model_config_params = config['model']['params']
+    clip_config = model_config_params['cond_stage_config']
+
+    if "parameterization" in model_config_params:
+        if model_config_params["parameterization"] == "v":
+            m = model.clone()
+            class ModelSamplingAdvanced(comfy.model_sampling.ModelSamplingDiscrete, comfy.model_sampling.V_PREDICTION):
+                pass
+            m.add_object_patch("model_sampling", ModelSamplingAdvanced(model.model.model_config))
+            model = m
+
+    layer_idx = clip_config.get("params", {}).get("layer_idx", None)
+    if layer_idx is not None:
+        clip.clip_layer(layer_idx)
+
+    return model
+
+
 def load_checkpoint_guess_config(ckpt_path,  output_model=True, model_options={}, disable_dynamic=False):
     # TODO: Modify this function to load mlp state dict
     sd, metadata = load_torch_file(ckpt_path, return_metadata=True)
-    out = load_state_dict_guess_config(sd,  output_model, model_options, metadata=metadata, disable_dynamic=disable_dynamic)
-    if out is None:
+    model = load_state_dict_guess_config(sd,  output_model, model_options, metadata=metadata, disable_dynamic=disable_dynamic)
+    if model is None:
         raise RuntimeError("ERROR: Could not detect model type of: {}\n{}".format(ckpt_path, model_detection_error_hint(ckpt_path, sd)))
 
-    return out
-
+    return model
+def model_detection_error_hint(path, state_dict):
+    filename = os.path.basename(path)
+    if 'lora' in filename.lower():
+        return "\nHINT: This seems to be a Lora file and Lora files should be put in the lora folder and loaded with a lora loader node.."
+    return ""
 
 
 def load_state_dict_guess_config(sd, output_model=True, model_options={}, metadata=None, disable_dynamic=False):
-    #TODO:
-
     model = None
     model_patcher = None
 
