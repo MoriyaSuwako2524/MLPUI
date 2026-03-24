@@ -8,33 +8,22 @@ import mlpui.model_patcher
 import os
 import yaml
 
-def load_checkpoint(config_path=None, ckpt_path=None, output_vae=True, output_clip=True, embedding_directory=None, state_dict=None, config=None):
-    logging.warning("Warning: The load checkpoint with config function is deprecated and will eventually be removed, please use the other one.")
-    model = load_checkpoint_guess_config(ckpt_path, embedding_directory=embedding_directory, output_model=True)
+def load_checkpoint(config_path=None, ckpt_path=None, state_dict=None, config=None):
+
+    model = load_checkpoint_guess_config(ckpt_path,  output_model=True)
     #TODO: this function is a mess and should be removed eventually
     if config is None:
         with open(config_path, 'r') as stream:
             config = yaml.safe_load(stream)
     model_config_params = config['model']['params']
-    clip_config = model_config_params['cond_stage_config']
 
-    if "parameterization" in model_config_params:
-        if model_config_params["parameterization"] == "v":
-            m = model.clone()
-            class ModelSamplingAdvanced(comfy.model_sampling.ModelSamplingDiscrete, comfy.model_sampling.V_PREDICTION):
-                pass
-            m.add_object_patch("model_sampling", ModelSamplingAdvanced(model.model.model_config))
-            model = m
 
-    layer_idx = clip_config.get("params", {}).get("layer_idx", None)
-    if layer_idx is not None:
-        clip.clip_layer(layer_idx)
 
     return model
 
 
 def load_checkpoint_guess_config(ckpt_path,  output_model=True, model_options={}, disable_dynamic=False):
-    # TODO: Modify this function to load mlp state dict
+
     sd, metadata = load_torch_file(ckpt_path, return_metadata=True)
     model = load_state_dict_guess_config(sd,  output_model, model_options, metadata=metadata, disable_dynamic=disable_dynamic)
     if model is None:
