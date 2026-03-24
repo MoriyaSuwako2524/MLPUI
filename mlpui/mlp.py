@@ -17,7 +17,7 @@ def load_checkpoint_guess_config(ckpt_path,  output_model=True, model_options={}
 
 
 def load_state_dict_guess_config(sd, output_model=True, model_options={}, metadata=None, disable_dynamic=False):
-    #TODO: Modify this function to load mlp state dict
+    #TODO:
 
     model = None
     model_patcher = None

@@ -85,9 +85,32 @@ class BaseModel(torch.nn.Module):
 class UMA(BaseModel):
     def __init__(self, model_config, model_type=ModelType.V_PREDICTION, device=None):
         super().__init__(model_config, model_type, device=device, unet_model=uma.eSCNMDBackbone)
+        if model_config.unet_config.get("has_mole", False):
+            from mlpui.models.nn.mole_utils import convert_model_to_MOLE_model
+            num_experts = model_config.unet_config.get("num_experts", 32)
+            convert_model_to_MOLE_model(
+                self.diffusion_model,
+                num_experts=num_experts,
+                use_composition_embedding=model_config.unet_config.get("use_composition_embedding", False),
+            )
     def get_dtype(self):
         try:
             return next(self.diffusion_model.parameters()).dtype
         except StopIteration:
             return torch.float32
+    def load_model_weights(self, sd, unet_prefix="", assign=False):
+        to_load = {}
+        keys = list(sd.keys())
+        for k in keys:
+            if k.startswith(unet_prefix):
+                to_load[k[len(unet_prefix):]] = sd.pop(k)
+        to_load = self.model_config.process_unet_state_dict(to_load)
+        m, u = self.diffusion_model.load_state_dict(to_load, strict=False, assign=assign)
+        if len(m) > 0:
+            logging.warning("unet missing: {}".format(m))
+
+        if len(u) > 0:
+            logging.warning("unet unexpected: {}".format(u))
+        del to_load
+        return self
 

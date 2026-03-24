@@ -61,9 +61,11 @@ class BASE:
 
 class UMA(BASE):
     def get_model(self, state_dict, prefix="", device=None):
-        logging.info("Loading UMA model")
         import mlpui.model_base as model_base
         out = model_base.UMA(self, device=device)
+
+
+
         return out
 
 

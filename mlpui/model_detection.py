@@ -81,8 +81,15 @@ def detect_unet_config(state_dict, key_prefix, metadata=None):
         else:
             mlp_config["chg_spin_emb_type"] = "pos_emb"
 
-
+        so3_key = "{}blocks.0.atom_wise.so3_linear_1.weight".format(key_prefix)
+        if so3_key in state_dict:
+            mlp_config["hidden_channels"] = state_dict[so3_key].shape[1]
         mlp_config["has_mole"] = "{}routing_mlp.0.weight".format(key_prefix) in keys
+        if mlp_config["has_mole"]:
+            mole_weight_key = "{}blocks.0.edge_wise.so2_conv_1.fc_m0.weight".format(key_prefix)
+            if mole_weight_key in state_dict and state_dict[mole_weight_key].ndim == 3:
+                mlp_config["num_experts"] = state_dict[mole_weight_key].shape[0]
+        mlp_config["use_composition_embedding"] = "{}composition_embedding.weight".format(key_prefix) in keys
         datasets = [
             k.split(".")[-2]
             for k in keys
