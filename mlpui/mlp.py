@@ -1,23 +1,16 @@
 from mlpui.model_loader import load_torch_file
 from mlpui.utils import calculate_parameters,_weight_dtype
 import mlpui.model_management as model_management
-from model_detection import unet_prefix_from_state_dict,model_config_from_unet
+from mlpui.model_detection import unet_prefix_from_state_dict,model_config_from_unet
 import logging
 import torch
 import mlpui.model_patcher
 import os
 import yaml
 
-def load_checkpoint(config_path=None, ckpt_path=None, state_dict=None, config=None):
+def load_checkpoint( ckpt_path=None, state_dict=None, config=None):
 
     model = load_checkpoint_guess_config(ckpt_path,  output_model=True)
-    #TODO: this function is a mess and should be removed eventually
-    if config is None:
-        with open(config_path, 'r') as stream:
-            config = yaml.safe_load(stream)
-    model_config_params = config['model']['params']
-
-
 
     return model
 
@@ -65,7 +58,7 @@ def load_state_dict_guess_config(sd, output_model=True, model_options={}, metada
     if output_model:
         inital_load_device = model_management.unet_inital_load_device(parameters, unet_dtype)
         model = model_config.get_model(sd, mlp_model_prefix, device=inital_load_device)
-        ModelPatcher = model_patcher.ModelPatcher if disable_dynamic else model_patcher.CoreModelPatcher
+        ModelPatcher = mlpui.model_patcher.ModelPatcher
         model_patcher = ModelPatcher(model, load_device=load_device, offload_device=model_management.unet_offload_device())
         model.load_model_weights(sd, mlp_model_prefix, assign=model_patcher.is_dynamic())
 
