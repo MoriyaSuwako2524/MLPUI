@@ -49,19 +49,24 @@ class UMAInputAdapter(InputAdapter):
 
         data = AtomicData.from_ase(
             atoms,
+            task_name=self.task,
             r_edges=False,
             r_data_keys=["charge", "spin"],
         )
 
         data["charge"] = torch.tensor([self.charge], dtype=torch.long)
         data["spin"] = torch.tensor([self.spin], dtype=torch.long)
-
+        data["natoms"] = torch.tensor([len(atoms)], dtype=torch.long)
         if self.task is not None:
             data["dataset"] = [self.task]
 
         if "batch" not in data or data.get("batch", None) is None:
             data["batch"] = torch.zeros(len(atoms), dtype=torch.long)
 
+        print("keys:", list(data.keys()))
+        print("natoms:", data.get("natoms", "MISSING"))
+        print("cell:", data.get("cell", "MISSING"))
+        print("pbc:", data.get("pbc", "MISSING"))
         return data.to(device)
 
 
@@ -186,7 +191,7 @@ class MLPCalculator(Calculator):
 
         backbone = self._get_backbone()
         backbone.eval()
-        backbone.always_use_pbc = False
+
         self._ready = True
 
     def _maybe_offload(self):
@@ -250,6 +255,7 @@ class MLPCalculator(Calculator):
             model_input = self._input_adapter.convert(atoms, self._device, self._dtype)
             with torch.no_grad() if "forces" not in self._properties else torch.enable_grad():
                 raw_output = self._forward(model_input)
+                print(raw_output)
             self.results = self._output_adapter.convert(raw_output, atoms)
         finally:
             self._maybe_offload()
@@ -274,8 +280,10 @@ class MLPCalculator(Calculator):
 
 
 class UMACalculator(MLPCalculator):
-    def __init__(self,):
-        super().__init__()
+    def __init__(self,model_patcher,input_adapter: InputAdapter,output_adapter: OutputAdapter,
+                 properties: list[str],dtype: torch.dtype,device: torch.device,keep_on_device: bool,
+    ):
+        super().__init__(model_patcher,input_adapter,output_adapter,properties,dtype,device,keep_on_device)
 
     def calculate(
         self,
@@ -284,24 +292,59 @@ class UMACalculator(MLPCalculator):
         system_changes: list[str] = all_changes,
     ):
         self._check_atoms_pbc(atoms)
-        super().calculate(atoms, properties, system_changes)
-        if atoms is None:
-            atoms = self.atoms
 
-        try:
-            self._ensure_ready()
-            model_input = self._input_adapter.convert(atoms, self._device, self._dtype)
-            with torch.no_grad() if "forces" not in self._properties else torch.enable_grad():
-                raw_output = self._forward(model_input)
-            self.results = self._output_adapter.convert(raw_output, atoms)
-        finally:
-            self._maybe_offload()
+
+
+        super().calculate(atoms, properties, system_changes)
+    def _forward(self, model_input) -> Any:
+        print(model_input)
+        model = self._patcher.model
+        backbone = self._get_backbone()
+        if not getattr(self, '_inference_prepared', False):
+            if hasattr(backbone, 'prepare_for_inference'):
+                from mlpui.models.uma.inference import InferenceSettings
+                settings = InferenceSettings()
+                new_backbone = backbone.prepare_for_inference(model_input, settings)
+                if new_backbone is not backbone:
+                    model.diffusion_model = new_backbone
+                    backbone = new_backbone
+            self._inference_prepared = True
+
+
+        if hasattr(model, "apply_model"):
+            return model.apply_model(model_input)
+
+        if hasattr(model_input, "atomic_numbers"):
+            needs_grad = "forces" in self._properties
+            if needs_grad and hasattr(model_input, "pos") and not model_input.pos.requires_grad:
+                model_input.pos.requires_grad_(True)
+            ctx = torch.enable_grad() if needs_grad else torch.no_grad()
+            with ctx:
+                return backbone(model_input)
+
+        pos = model_input["pos"]
+        ctx = torch.enable_grad() if pos.requires_grad else torch.no_grad()
+        with ctx:
+            return backbone(model_input["z"], pos, model_input["batch"])
     def _check_atoms_pbc(self, atoms) -> None:
         if np.all(atoms.pbc) and np.allclose(atoms.cell, 0):
             raise AllZeroUnitCellError
         if np.any(atoms.pbc) and not np.all(atoms.pbc):
             raise MixedPBCError
+    def _ensure_ready(self):
 
+        if self._ready:
+            return
+
+        self._patcher.to_device(self._device)
+        if self._patcher.num_patches > 0:
+            self._patcher.patch_model(device=self._device)
+
+        backbone = self._get_backbone()
+        backbone.eval()
+        backbone.always_use_pbc = False
+        backbone.otf_graph = True
+        self._ready = True
 
 @dataclass
 class CalculatorBuilder:
@@ -316,7 +359,7 @@ class CalculatorBuilder:
     device: torch.device | str | None = None
     keep_on_device: bool = True
 
-    def build(self) -> MLPCalculator:
+    def build(self):
 
         device = self._resolve_device()
         input_adapter = self._resolve_input_adapter()
@@ -329,16 +372,28 @@ class CalculatorBuilder:
             type(output_adapter).__name__,
             device,
         )
-
-        return MLPCalculator(
-            model_patcher=self.model_patcher,
-            input_adapter=input_adapter,
-            output_adapter=output_adapter,
-            properties=self.properties,
-            dtype=self.dtype,
-            device=device,
-            keep_on_device=self.keep_on_device,
-        )
+        family = self._detect_model_family()
+        print(f"Family: {family}")
+        if family == "uma":
+            return UMACalculator(
+                model_patcher=self.model_patcher,
+                input_adapter=input_adapter,
+                output_adapter=output_adapter,
+                properties=self.properties,
+                dtype=self.dtype,
+                device=device,
+                keep_on_device=self.keep_on_device,
+            )
+        else:
+            return MLPCalculator(
+                model_patcher=self.model_patcher,
+                input_adapter=input_adapter,
+                output_adapter=output_adapter,
+                properties=self.properties,
+                dtype=self.dtype,
+                device=device,
+                keep_on_device=self.keep_on_device,
+            )
 
 
 
@@ -350,7 +405,6 @@ class CalculatorBuilder:
 
         backbone = self._get_backbone()
         cls_name = type(backbone).__name__.lower()
-
         if "escnmd" in cls_name or "uma" in cls_name:
             return "uma"
 
@@ -366,7 +420,7 @@ class CalculatorBuilder:
         return "simple"
 
     def _resolve_input_adapter(self) -> InputAdapter:
-        """Pick the right InputAdapter based on model family."""
+
         family = self._detect_model_family()
 
         if family == "uma":
@@ -381,9 +435,7 @@ class CalculatorBuilder:
         return SimpleInputAdapter(needs_grad=needs_grad)
 
     def _resolve_output_adapter(self) -> OutputAdapter:
-        """Pick the right OutputAdapter based on model family."""
         family = self._detect_model_family()
-
         if family == "uma":
             return UMAOutputAdapter(self.properties)
 
@@ -394,17 +446,11 @@ class CalculatorBuilder:
             return torch.device(self.device) if isinstance(self.device, str) else self.device
         return self.model_patcher.load_device
 
-    # ── convenience constructors ──────────────────────────────────────
+
 
     @classmethod
     def from_checkpoint(cls, ckpt_path: str, **kwargs) -> CalculatorBuilder:
-        """
-        Load checkpoint and create builder in one step.
 
-        ≈ ComfyUI CheckpointLoaderSimple + wiring to KSampler.
-
-            calc = CalculatorBuilder.from_checkpoint("model.pt").build()
-        """
         from mlpui.mlp import load_checkpoint_guess_config
         patcher = load_checkpoint_guess_config(ckpt_path)
         return cls(model_patcher=patcher, **kwargs)
@@ -416,21 +462,7 @@ class CalculatorBuilder:
         finetune_sd: dict[str, torch.Tensor],
         **kwargs,
     ) -> CalculatorBuilder:
-        """
-        Clone base patcher, apply patches, return builder.
 
-        ≈ ComfyUI LoRA Loader → patched model → KSampler.
-
-            base = load_checkpoint_guess_config("foundation.pt")
-
-            # Energy calculator (base model)
-            calc_e = CalculatorBuilder(base).build()
-
-            # Dipole calculator (patched model, shared backbone)
-            calc_d = CalculatorBuilder.from_patcher_with_patches(
-                base, dipole_sd, properties=["dipole"]
-            ).build()
-        """
         cloned = base_patcher.clone()
         cloned.load_finetune(finetune_sd)
         return cls(model_patcher=cloned, **kwargs)

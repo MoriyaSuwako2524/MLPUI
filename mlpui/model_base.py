@@ -20,7 +20,23 @@ class ModelType(Enum):
     FLOW_COSMOS = 10
     IMG_TO_IMG_FLOW = 11
 
+def filter_kwargs_for_class(cls, config: dict) -> dict:
+    valid_params = set()
+    has_var_keyword = False
 
+    for klass in cls.__mro__:
+        if klass is object:
+            continue
+        sig = inspect.signature(klass.__init__)
+        for name, param in sig.parameters.items():
+            if name == 'self':
+                continue
+            if param.kind == inspect.Parameter.VAR_KEYWORD:
+
+                continue
+            valid_params.add(name)
+
+    return {k: v for k, v in config.items() if k in valid_params}
 
 class BaseModel(torch.nn.Module):
     def __init__(self, model_config, model_type=ModelType.EPS, device=None, unet_model=uma.eSCNMDBackbone):
@@ -42,10 +58,8 @@ class BaseModel(torch.nn.Module):
                 for p in sig.parameters.values()
             )
 
-            if has_var_keyword:
-                filtered_config = unet_config
-            else:
-                filtered_config = {k: v for k, v in unet_config.items() if k in valid_params}
+
+            filtered_config  = filter_kwargs_for_class(unet_model, unet_config)
 
             self.diffusion_model = unet_model(**filtered_config)
             self.diffusion_model.eval()
@@ -84,15 +98,13 @@ class BaseModel(torch.nn.Module):
 
 class UMA(BaseModel):
     def __init__(self, model_config, model_type=ModelType.V_PREDICTION, device=None):
-        super().__init__(model_config, model_type, device=device, unet_model=uma.eSCNMDBackbone)
         if model_config.unet_config.get("has_mole", False):
-            from mlpui.models.nn.mole_utils import convert_model_to_MOLE_model
-            num_experts = model_config.unet_config.get("num_experts", 32)
-            convert_model_to_MOLE_model(
-                self.diffusion_model,
-                num_experts=num_experts,
-                use_composition_embedding=model_config.unet_config.get("use_composition_embedding", False),
-            )
+            unet_cls = uma.eSCNMDMoeBackbone
+        else:
+            unet_cls = uma.eSCNMDBackbone
+        print("unet_config:", model_config.unet_config)
+        super().__init__(model_config, model_type, device=device, unet_model=unet_cls)
+
     def get_dtype(self):
         try:
             return next(self.diffusion_model.parameters()).dtype
@@ -113,4 +125,5 @@ class UMA(BaseModel):
             logging.warning("unet unexpected: {}".format(u))
         del to_load
         return self
+
 
