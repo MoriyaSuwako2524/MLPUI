@@ -232,9 +232,6 @@ class ModelPatcher:
         logger.info("Restored original weights")
         return self.model
 
-    # ------------------------------------------------------------------
-    # Clone — shared backbone, independent patches
-    # ------------------------------------------------------------------
 
     def clone(self) -> ModelPatcher:
         """
@@ -263,8 +260,7 @@ class ModelPatcher:
         return new
 
     # ------------------------------------------------------------------
-    # Device management
-    # ------------------------------------------------------------------
+
 
     def to_device(self, device: torch.device | None = None) -> None:
         """Move backbone to the specified device (default: load_device)."""
@@ -283,9 +279,7 @@ class ModelPatcher:
         """Estimate model memory footprint in bytes."""
         return sum(p.numel() * p.element_size() for p in self.model.parameters())
 
-    # ------------------------------------------------------------------
-    # Convenience: load full fine-tune weights directly
-    # ------------------------------------------------------------------
+
 
     def load_finetune(
         self,
