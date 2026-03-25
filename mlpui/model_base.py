@@ -19,7 +19,7 @@ class ModelType(Enum):
     IMG_TO_IMG = 9
     FLOW_COSMOS = 10
     IMG_TO_IMG_FLOW = 11
-
+    ENERGY_FORCE = 12
 def filter_kwargs_for_class(cls, config: dict) -> dict:
     valid_params = set()
     has_var_keyword = False
@@ -39,7 +39,7 @@ def filter_kwargs_for_class(cls, config: dict) -> dict:
     return {k: v for k, v in config.items() if k in valid_params}
 
 class BaseModel(torch.nn.Module):
-    def __init__(self, model_config, model_type=ModelType.EPS, device=None, unet_model=uma.eSCNMDBackbone):
+    def __init__(self, model_config, model_type=ModelType.ENERGY_FORCE, device=None, unet_model=uma.eSCNMDBackbone):
         super().__init__()
 
         unet_config = model_config.unet_config
@@ -97,7 +97,7 @@ class BaseModel(torch.nn.Module):
         return self
 
 class UMA(BaseModel):
-    def __init__(self, model_config, model_type=ModelType.V_PREDICTION, device=None):
+    def __init__(self, model_config, model_type=ModelType.ENERGY_FORCE, device=None):
         if model_config.unet_config.get("has_mole", False):
             unet_cls = uma.eSCNMDMoeBackbone
         else:
