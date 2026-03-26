@@ -60,7 +60,7 @@ def load_state_dict_guess_config(sd, output_model=True, model_options={}, metada
         model = model_config.get_model(sd, mlp_model_prefix, device=inital_load_device)
         ModelPatcher = mlpui.model_patcher.ModelPatcher
         model_patcher = ModelPatcher(model, load_device=load_device, offload_device=model_management.unet_offload_device())
-        model.load_model_weights(sd, mlp_model_prefix, assign=model_patcher.is_dynamic())
+        model.load_model_weights(sd, mlp_model_prefix, assign=model_patcher.is_dynamic(), metadata=metadata)
 
 
     left_over = sd.keys()

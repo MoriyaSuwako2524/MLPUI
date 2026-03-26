@@ -1,0 +1,10 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(wc -l /d/calculate/github/MLPUI/mlpui/*.py)",
+      "Bash(grep -r \"^class \" /d/calculate/github/MLPUI/mlpui/*.py)",
+      "Bash(python -c \":*)",
+      "Bash(python:*)"
+    ]
+  }
+}

@@ -37,15 +37,18 @@ class OutputAdapter(ABC):
 
 
 class UMAInputAdapter(InputAdapter):
-    """Input adapter for UMA-family models (eSCNMDBackbone)."""
 
-    def __init__(self, charge: int = 0, spin: int = 0, task: str | None = None):
-        self.charge = charge
-        self.spin = spin
+
+    def __init__(self, task: str | None = None):
         self.task = task
 
     def convert(self, atoms: ase.Atoms, device: torch.device, dtype: torch.dtype) -> Any:
         from mlpui.models.common.atomic_data import AtomicData
+
+        # Ensure defaults so atoms without info["charge"/"spin"] work correctly.
+        # from_ase reads these via r_data_keys — no manual override needed.
+        atoms.info.setdefault("charge", 0)
+        atoms.info.setdefault("spin",   0)
 
         data = AtomicData.from_ase(
             atoms,
@@ -54,8 +57,7 @@ class UMAInputAdapter(InputAdapter):
             r_data_keys=["charge", "spin"],
         )
 
-        data["charge"] = torch.tensor([self.charge], dtype=torch.long)
-        data["spin"] = torch.tensor([self.spin], dtype=torch.long)
+
         data["natoms"] = torch.tensor([len(atoms)], dtype=torch.long)
         if self.task is not None:
             data["dataset"] = [self.task]
@@ -63,10 +65,6 @@ class UMAInputAdapter(InputAdapter):
         if "batch" not in data or data.get("batch", None) is None:
             data["batch"] = torch.zeros(len(atoms), dtype=torch.long)
 
-        print("keys:", list(data.keys()))
-        print("natoms:", data.get("natoms", "MISSING"))
-        print("cell:", data.get("cell", "MISSING"))
-        print("pbc:", data.get("pbc", "MISSING"))
         return data.to(device)
 
 
@@ -177,6 +175,19 @@ class MLPCalculator(Calculator):
         self._device = device
         self._keep_on_device = keep_on_device
         self._ready = False
+        self._last_charge: int | None = None
+        self._last_spin: int | None = None
+
+    def check_state(self, atoms: ase.Atoms, tol: float = 1e-15) -> list[str]:
+        # ASE's default check_state only compares geometry, not atoms.info.
+        # Extend it to invalidate cache when charge or spin changes.
+        changes = super().check_state(atoms, tol)
+        charge = atoms.info.get("charge", 0)
+        spin   = atoms.info.get("spin",   0)
+        if charge != self._last_charge or spin != self._last_spin:
+            if "charge_spin" not in changes:
+                changes.append("charge_spin")
+        return changes
 
 
 
@@ -255,8 +266,9 @@ class MLPCalculator(Calculator):
             model_input = self._input_adapter.convert(atoms, self._device, self._dtype)
             with torch.no_grad() if "forces" not in self._properties else torch.enable_grad():
                 raw_output = self._forward(model_input)
-                print(raw_output)
             self.results = self._output_adapter.convert(raw_output, atoms)
+            self._last_charge = atoms.info.get("charge", 0)
+            self._last_spin   = atoms.info.get("spin",   0)
         finally:
             self._maybe_offload()
 
@@ -297,7 +309,6 @@ class UMACalculator(MLPCalculator):
 
         super().calculate(atoms, properties, system_changes)
     def _forward(self, model_input) -> Any:
-        print(model_input)
         model = self._patcher.model
         backbone = self._get_backbone()
         if not getattr(self, '_inference_prepared', False):
@@ -310,7 +321,6 @@ class UMACalculator(MLPCalculator):
                     backbone = new_backbone
             self._inference_prepared = True
 
-
         if hasattr(model, "apply_model"):
             return model.apply_model(model_input)
 
@@ -320,7 +330,21 @@ class UMACalculator(MLPCalculator):
                 model_input.pos.requires_grad_(True)
             ctx = torch.enable_grad() if needs_grad else torch.no_grad()
             with ctx:
-                return backbone(model_input)
+                backbone_out = backbone(model_input)
+                if hasattr(model, "output_head") and model.output_head is not None:
+                    dataset = None
+                    try:
+                        d = model_input["dataset"]
+                        dataset = d[0] if isinstance(d, (list, tuple)) else d
+                    except (KeyError, AttributeError, TypeError):
+                        pass
+                    return model.output_head(
+                        backbone_out,
+                        model_input["pos"],
+                        model_input["atomic_numbers"],
+                        dataset,
+                    )
+                return backbone_out
 
         pos = model_input["pos"]
         ctx = torch.enable_grad() if pos.requires_grad else torch.no_grad()
@@ -353,8 +377,6 @@ class CalculatorBuilder:
     model_patcher: Any
     properties: list[str] = field(default_factory=lambda: ["energy", "forces"])
     task: str | None = None
-    charge: int = 0
-    spin: int = 0
     dtype: torch.dtype = torch.float32
     device: torch.device | str | None = None
     keep_on_device: bool = True
@@ -424,11 +446,7 @@ class CalculatorBuilder:
         family = self._detect_model_family()
 
         if family == "uma":
-            return UMAInputAdapter(
-                charge=self.charge,
-                spin=self.spin,
-                task=self.task,
-            )
+            return UMAInputAdapter(task=self.task)
 
         # TensorNet, NewtonNet, etc. — all use simple (z, pos, batch)
         needs_grad = "forces" in self.properties

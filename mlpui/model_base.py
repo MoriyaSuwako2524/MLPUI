@@ -6,6 +6,38 @@ import mlpui.supported_models as supported_models
 import mlpui.models.uma.uma as uma
 import mlpui.model_management as model_management
 import inspect
+
+
+def _load_normalizer_into_head(head, metadata: dict) -> None:
+    """Parse tasks_config from checkpoint metadata and populate head normaliser."""
+    tasks_config = metadata.get("tasks_config", None)
+    if not tasks_config:
+        return
+
+    rmsd = 1.0
+    mean = 0.0
+    dataset_refs: dict[str, list[float]] = {}
+
+    for task in tasks_config:
+        if task.get("property") != "energy":
+            continue
+        norm = task.get("normalizer", {})
+        rmsd = float(norm.get("rmsd", rmsd))
+        mean = float(norm.get("mean", mean))
+
+        elem_refs_cfg = task.get("element_references")
+        if elem_refs_cfg:
+            try:
+                refs_list = elem_refs_cfg["element_references"]["_args_"][0]
+            except (KeyError, IndexError, TypeError):
+                refs_list = None
+            if refs_list is not None:
+                for dataset in task.get("datasets", []):
+                    dataset_refs[dataset] = refs_list
+
+    head.load_normalizer(rmsd=rmsd, mean=mean, dataset_element_refs=dataset_refs)
+    logging.info("Loaded normaliser rmsd=%.4f, mean=%.4f for datasets=%s",
+                 rmsd, mean, list(dataset_refs.keys()))
 class ModelType(Enum):
     #TODO: Shift to GNN type?
     EPS = 1
@@ -104,13 +136,15 @@ class UMA(BaseModel):
             unet_cls = uma.eSCNMDBackbone
         print("unet_config:", model_config.unet_config)
         super().__init__(model_config, model_type, device=device, unet_model=unet_cls)
+        self.output_head = None
 
     def get_dtype(self):
         try:
             return next(self.diffusion_model.parameters()).dtype
         except StopIteration:
             return torch.float32
-    def load_model_weights(self, sd, unet_prefix="", assign=False):
+
+    def load_model_weights(self, sd, unet_prefix="", assign=False, metadata=None):
         to_load = {}
         keys = list(sd.keys())
         for k in keys:
@@ -120,9 +154,35 @@ class UMA(BaseModel):
         m, u = self.diffusion_model.load_state_dict(to_load, strict=False, assign=assign)
         if len(m) > 0:
             logging.warning("unet missing: {}".format(m))
-
         if len(u) > 0:
             logging.warning("unet unexpected: {}".format(u))
+
+        # Load output head weights from the remaining state dict.
+        # Head keys are NOT under unet_prefix (e.g. "module.backbone.") but
+        # under a sibling prefix (e.g. "module.output_heads.*"), so they are
+        # still present in `sd` after the backbone keys were popped out.
+        HEAD_SUFFIX = "output_heads.energyandforcehead.head."
+        head_sd = {}
+        for k in list(sd.keys()):
+            # Find the segment after the last occurrence of HEAD_SUFFIX
+            idx = k.find(HEAD_SUFFIX)
+            if idx != -1:
+                short_key = k[idx + len(HEAD_SUFFIX):]
+                head_sd[short_key] = sd.pop(k)
+        if head_sd:
+            from mlpui.models.uma.output_heads import EnergyAndForceHead
+            sphere_channels = self.model_config.unet_config.get("sphere_channels", 128)
+            head = EnergyAndForceHead(sphere_channels=sphere_channels)
+            missing, unexpected = head.load_state_dict(head_sd, strict=False)
+            if missing:
+                logging.warning("output_head missing keys: {}".format(missing))
+            if unexpected:
+                logging.warning("output_head unexpected keys: {}".format(unexpected))
+            if metadata is not None:
+                _load_normalizer_into_head(head, metadata)
+            self.output_head = head
+            logging.info("Loaded EnergyAndForceHead (sphere_channels=%d)", sphere_channels)
+
         del to_load
         return self
 

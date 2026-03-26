@@ -92,7 +92,54 @@ def detect_unet_config(state_dict, key_prefix, metadata=None):
                 mlp_config["num_experts"] = state_dict[mole_weight_key].shape[0]
         mlp_config["use_composition_embedding"] = "{}composition_embedding.weight".format(key_prefix) in keys
         heads = {}
-        if "'module.output_heads.energyandforcehead.head.energy_block.2.bias" in keys:
+        head_prefix = "module.output_heads."
+        for key in state_dict.keys():
+            if not key.startswith(head_prefix):
+                continue
+
+            # Extract head name: module.output_heads.<head_name>.xxx
+            remainder = key[len(head_prefix):]
+            parts = remainder.split(".", 1)
+            if len(parts) < 2:
+                continue
+            head_name = parts[0]
+
+            if head_name not in heads:
+                heads[head_name] = {
+                    "type": "unknown",
+                    "has_mole": False,
+                    "energy_block_layers": [],
+                }
+
+            sub_key = parts[1]
+
+            if "energy_block" in sub_key:
+                heads[head_name]["type"] = "efs"
+
+
+            if "global_mole_tensors" in sub_key or sub_key.startswith("head.") and "weights" in sub_key:
+                if state_dict[key].ndim == 3:
+                    heads[head_name]["has_mole"] = True
+
+        for head_name, config in heads.items():
+            if config["type"] != "efs":
+                continue
+
+            layers = {}
+            for key in state_dict.keys():
+                block_prefix = f"{head_prefix}{head_name}.head.energy_block."
+                if not key.startswith(block_prefix):
+                    continue
+                sub = key[len(block_prefix):]  # e.g. "0.weight", "2.bias"
+                parts = sub.split(".")
+                layer_idx = int(parts[0])
+                param_type = parts[1]  # "weight" or "bias"
+
+                if param_type == "weight":
+                    w = state_dict[key]
+                    layers[layer_idx] = {"out": w.shape[0], "in": w.shape[1]}
+
+            config["energy_block_layers"] = [layers[k] for k in sorted(layers.keys())]
 
         datasets = [
             k.split(".")[-2]
