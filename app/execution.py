@@ -1,7 +1,12 @@
 """Graph execution engine — topological sort then execute each node."""
 
 from __future__ import annotations
+import json
+import os
 from collections import defaultdict
+from datetime import datetime
+
+_output_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "output")
 
 
 def execute_prompt(prompt: dict) -> dict:
@@ -60,7 +65,23 @@ def execute_prompt(prompt: dict) -> dict:
                 "outputs": _serialise_outputs(outputs, node_class),
             }
 
-    return {"status": "success", "ui": ui_results}
+    result = {"status": "success", "ui": ui_results}
+    _save_run(prompt, result)
+    return result
+
+
+def _save_run(prompt: dict, result: dict) -> None:
+    os.makedirs(_output_dir, exist_ok=True)
+    run_id = datetime.now().strftime("%Y%m%d_%H%M%S_%f")[:20]
+    data = {
+        "run_id":    run_id,
+        "timestamp": datetime.now().isoformat(timespec="seconds"),
+        "prompt":    prompt,
+        "result":    result,
+    }
+    path = os.path.join(_output_dir, f"{run_id}.json")
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(data, f, ensure_ascii=False, indent=2, default=str)
 
 
 # ── helpers ─────────────────────────────────────────────────────────────────

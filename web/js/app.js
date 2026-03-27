@@ -1,19 +1,17 @@
 /**
  * app.js — MLPUI node-graph application.
- *
- * Design mirrors ComfyUI:
- *   - /object_info  → register LiteGraph node types
- *   - Graph JSON    → POST /prompt → execution result → output panel
  */
 
 // Colour palette for connection wires by type
 const TYPE_COLORS = {
-    MLP_CALCULATOR: "#4a9eff",
-    ASE_ATOMS:      "#f0a500",
-    FLOAT:          "#b5cea8",
-    STRING:         "#ce9178",
-    INT:            "#b5cea8",
-    BOOLEAN:        "#569cd6",
+    MLP_RESULT:      "#9c6fd6",
+    ASE_ATOMS:       "#f0a500",
+    ASE_ATOMS_LIST:  "#e07820",
+    BATCH_RESULT:    "#c85cc8",
+    FLOAT:           "#b5cea8",
+    STRING:          "#ce9178",
+    INT:             "#b5cea8",
+    BOOLEAN:         "#569cd6",
 };
 
 // Widget types that live inside the node (not connection slots)
@@ -31,11 +29,11 @@ class MLPUIApp {
         // --- canvas ---
         const el = document.getElementById("graph-canvas");
         this.canvas = new LGraphCanvas(el, this.graph);
-        this.canvas.background_image = "";
-        this.canvas.render_shadows = false;
-        this.canvas.render_canvas_border = false;
+        this.canvas.background_image      = "";
+        this.canvas.render_shadows        = false;
+        this.canvas.render_canvas_border  = false;
         this.canvas.always_render_background = true;
-        this.canvas.show_info = false;
+        this.canvas.show_info             = false;
 
         // --- load node types ---
         const info = await api.getObjectInfo();
@@ -45,14 +43,81 @@ class MLPUIApp {
         }
 
         // --- toolbar wiring ---
-        document.getElementById("btn-queue").addEventListener("click", () => this._queuePrompt());
-        document.getElementById("btn-clear").addEventListener("click", () => this._clearGraph());
+        document.getElementById("btn-queue").addEventListener("click",   () => this._queuePrompt());
+        document.getElementById("btn-clear").addEventListener("click",   () => this._clearGraph());
         document.getElementById("btn-arrange").addEventListener("click", () => this._arrange());
+
+        // --- output panel tab switching (Result / History) ---
+        document.querySelectorAll(".panel-tab").forEach(btn => {
+            btn.addEventListener("click", () => {
+                document.querySelectorAll(".panel-tab").forEach(b => b.classList.remove("active"));
+                btn.classList.add("active");
+                const view = btn.dataset.view;
+                document.getElementById("result-view").style.display  = view === "result"  ? "flex" : "none";
+                document.getElementById("history-view").style.display = view === "history" ? "flex" : "none";
+                if (view === "history") this._loadHistory();
+            });
+        });
+
+        // --- top toolbar tab switching (Inference / Training) ---
+        document.querySelectorAll(".tab-btn").forEach(btn => {
+            btn.addEventListener("click", () => {
+                document.querySelectorAll(".tab-btn").forEach(b => b.classList.remove("active"));
+                btn.classList.add("active");
+                const tab = btn.dataset.tab;
+                document.getElementById("main").style.display          = tab === "inference" ? "flex" : "none";
+                document.getElementById("training-main").style.display = tab === "training"  ? "flex" : "none";
+                if (tab === "inference") this.canvas.resize();
+            });
+        });
+
+        // --- drag-and-drop XYZ files ---
+        el.addEventListener("dragover", e => {
+            const hasFiles = [...e.dataTransfer.types].includes("Files");
+            if (!hasFiles) return;
+            e.preventDefault();
+            e.dataTransfer.dropEffect = "copy";
+            document.getElementById("canvas-wrap").classList.add("drag-over");
+        });
+        el.addEventListener("dragleave", () => {
+            document.getElementById("canvas-wrap").classList.remove("drag-over");
+        });
+        el.addEventListener("drop", async e => {
+            e.preventDefault();
+            document.getElementById("canvas-wrap").classList.remove("drag-over");
+            const files = [...e.dataTransfer.files].filter(
+                f => /\.(xyz|extxyz)$/i.test(f.name)
+            );
+            if (!files.length) return;
+            const rect = el.getBoundingClientRect();
+            let offsetX = 0;
+            for (const file of files) {
+                try {
+                    this._setStatus(`Uploading ${file.name}…`, "running");
+                    const { filename } = await api.uploadFile(file);
+
+                    // Re-fetch the updated node definition so the COMBO reflects new file
+                    const info = await api.getObjectInfo();
+                    if (info["ReadXYZFile"]) {
+                        this.nodeTypes["ReadXYZFile"] = info["ReadXYZFile"];
+                        this._registerNodeType("ReadXYZFile", info["ReadXYZFile"]);
+                    }
+
+                    const gx = (e.clientX - rect.left)  / this.canvas.ds.scale - this.canvas.ds.offset[0] + offsetX;
+                    const gy = (e.clientY - rect.top)   / this.canvas.ds.scale - this.canvas.ds.offset[1];
+                    this._createXYZNode(filename, gx, gy);
+                    offsetX += 260;
+                    this._setStatus("Ready");
+                } catch (err) {
+                    this._setStatus(`Upload failed: ${err.message}`, "error");
+                }
+            }
+        });
 
         // --- right-click menu ---
         el.addEventListener("contextmenu", e => {
             e.preventDefault();
-            // Convert screen coords → graph coords to check if we clicked a node
+            // Convert screen → graph coords to check if we clicked an existing node
             const rect = el.getBoundingClientRect();
             const gx = (e.clientX - rect.left)  / this.canvas.ds.scale - this.canvas.ds.offset[0];
             const gy = (e.clientY - rect.top)   / this.canvas.ds.scale - this.canvas.ds.offset[1];
@@ -65,10 +130,8 @@ class MLPUIApp {
         window.addEventListener("resize", () => this.canvas.resize());
         this.canvas.resize();
 
-        // Start with an example graph
+        // Start with the default graph
         this._loadDefaultGraph();
-
-        console.log("MLPUI ready. Registered node types:", Object.keys(info));
     }
 
     // ── Node type registration ────────────────────────────────────────────
@@ -95,11 +158,9 @@ class MLPUIApp {
         }
 
         function NodeClass() {
-            // Connection input slots
             for (const { name, type } of connInputs) {
                 this.addInput(name, type);
             }
-            // Widget inputs
             for (const w of widgetInputs) {
                 if (w.type === "COMBO") {
                     this.addWidget("combo", w.name, w.values[0], null, { values: w.values });
@@ -123,33 +184,26 @@ class MLPUIApp {
                     this.addWidget("toggle", w.name, w.config?.default ?? false);
                 }
             }
-            // Output slots
             for (let i = 0; i < nodeData.output.length; i++) {
                 const type = nodeData.output[i];
                 const name = nodeData.output_name?.[i] ?? type;
                 this.addOutput(name, type);
             }
 
-            this.color    = "#2d3748";
-            this.bgcolor  = "#1e2535";
+            this.color   = "#2d3748";
+            this.bgcolor = "#1e2535";
         }
 
-        NodeClass.title        = nodeData.display_name || nodeId;
-        NodeClass.category     = nodeData.category;
+        NodeClass.title    = nodeData.display_name || nodeId;
+        NodeClass.category = nodeData.category;
         NodeClass.prototype.comfy_class          = nodeId;
         NodeClass.prototype.comfy_conn_inputs    = connInputs;
         NodeClass.prototype.comfy_widget_inputs  = widgetInputs;
         NodeClass.prototype.comfy_is_output_node = nodeData.output_node;
 
-        // Colour output-nodes differently
         if (nodeData.output_node) {
             NodeClass.prototype.color   = "#2d3a2d";
             NodeClass.prototype.bgcolor = "#1e2a1e";
-        }
-
-        // Wire type colours
-        for (const type of nodeData.output) {
-            if (TYPE_COLORS[type]) LiteGraph.registered_node_types; // ensure registered
         }
 
         LiteGraph.registerNodeType(`${nodeData.category}/${nodeId}`, NodeClass);
@@ -165,33 +219,24 @@ class MLPUIApp {
 
             const inputs = {};
 
-            // Connection slot inputs
             let slotIdx = 0;
             for (const { name } of (node.comfy_conn_inputs ?? [])) {
                 const slot = node.inputs?.[slotIdx];
                 if (slot?.link != null) {
                     const link = this.graph.links[slot.link];
-                    if (link) {
-                        inputs[name] = [String(link.origin_id), link.origin_slot];
-                    }
+                    if (link) inputs[name] = [String(link.origin_id), link.origin_slot];
                 }
                 slotIdx++;
             }
 
-            // Widget inputs
             let widgetIdx = 0;
             for (const { name } of (node.comfy_widget_inputs ?? [])) {
                 const widget = node.widgets?.[widgetIdx];
-                if (widget !== undefined) {
-                    inputs[name] = widget.value;
-                }
+                if (widget !== undefined) inputs[name] = widget.value;
                 widgetIdx++;
             }
 
-            prompt[String(node.id)] = {
-                class_type: node.comfy_class,
-                inputs,
-            };
+            prompt[String(node.id)] = { class_type: node.comfy_class, inputs };
         }
 
         return prompt;
@@ -214,8 +259,9 @@ class MLPUIApp {
 
         try {
             const result = await api.queuePrompt(prompt);
+            this._switchOutputTab("result");
             this._displayResults(result.ui ?? {});
-            this._setStatus("Done ✓", "success");
+            this._setStatus("Done", "success");
         } catch (err) {
             this._setStatus(`Error: ${err.message}`, "error");
             this._showError(err.message);
@@ -255,7 +301,9 @@ class MLPUIApp {
 
             for (const out of data.outputs ?? []) {
                 if (out.type === "STRING") {
-                    body.textContent = out.value;
+                    // Pre-formatted text — show directly
+                    if (body.textContent) body.textContent += "\n\n";
+                    body.textContent += out.value;
                 } else {
                     body.textContent += `${out.name}: ${out.value}\n`;
                 }
@@ -277,7 +325,7 @@ class MLPUIApp {
     _setStatus(msg, cls = "") {
         const el = document.getElementById("status");
         el.textContent = msg;
-        el.className = cls;
+        el.className = cls ? `status-text ${cls}` : "status-text";
     }
 
     // ── Toolbar actions ───────────────────────────────────────────────────
@@ -300,7 +348,6 @@ class MLPUIApp {
     _showContextMenu(x, y) {
         const menu = document.getElementById("ctx-menu");
 
-        // Group node types by category
         const byCategory = {};
         for (const [nodeId, data] of Object.entries(this.nodeTypes)) {
             const cat = data.category || "default";
@@ -330,7 +377,6 @@ class MLPUIApp {
         menu.style.top     = `${y}px`;
         menu.style.display = "block";
 
-        // Keep inside viewport
         const rect = menu.getBoundingClientRect();
         if (rect.right  > window.innerWidth)  menu.style.left = `${x - rect.width}px`;
         if (rect.bottom > window.innerHeight) menu.style.top  = `${y - rect.height}px`;
@@ -343,11 +389,10 @@ class MLPUIApp {
     _addNode(nodeId, screenX, screenY) {
         const data = this.nodeTypes[nodeId];
         if (!data) return;
-        const type  = `${data.category}/${nodeId}`;
-        const node  = LiteGraph.createNode(type);
+        const type = `${data.category}/${nodeId}`;
+        const node = LiteGraph.createNode(type);
         if (!node) return;
 
-        // Convert screen coords to graph coords
         const canvasRect = document.getElementById("graph-canvas").getBoundingClientRect();
         const gx = (screenX - canvasRect.left) / this.canvas.ds.scale - this.canvas.ds.offset[0];
         const gy = (screenY - canvasRect.top)  / this.canvas.ds.scale - this.canvas.ds.offset[1];
@@ -357,33 +402,108 @@ class MLPUIApp {
         this.canvas.setDirty(true, true);
     }
 
+    // ── Output panel tab helpers ──────────────────────────────────────────
+
+    _switchOutputTab(view) {
+        document.querySelectorAll(".panel-tab").forEach(b => {
+            b.classList.toggle("active", b.dataset.view === view);
+        });
+        document.getElementById("result-view").style.display  = view === "result"  ? "flex" : "none";
+        document.getElementById("history-view").style.display = view === "history" ? "flex" : "none";
+    }
+
+    async _loadHistory() {
+        const container = document.getElementById("history-content");
+        container.innerHTML = '<p class="empty-hint">Loading…</p>';
+        try {
+            const runs = await api.getHistory();
+            container.innerHTML = "";
+            if (!runs.length) {
+                container.innerHTML = '<p class="empty-hint">No runs yet.</p>';
+                return;
+            }
+            for (const run of runs) {
+                const item = document.createElement("div");
+                item.className = "history-item";
+                item.dataset.runId = run.run_id;
+
+                const ts = run.timestamp.replace("T", " ");
+                item.innerHTML =
+                    `<div class="hi-time">${ts}</div>` +
+                    `<div class="hi-label">${run.label || "(no output)"}</div>`;
+
+                item.addEventListener("click", () => this._showHistoryRun(run.run_id, item));
+                container.appendChild(item);
+            }
+        } catch (err) {
+            container.innerHTML = `<p class="empty-hint">Error: ${err.message}</p>`;
+        }
+    }
+
+    async _showHistoryRun(runId, itemEl) {
+        // Mark active item
+        document.querySelectorAll(".history-item").forEach(el => el.classList.remove("active"));
+        itemEl.classList.add("active");
+
+        try {
+            const data = await api.getHistoryRun(runId);
+            this._switchOutputTab("result");
+            this._displayResults(data.result?.ui ?? {});
+        } catch (err) {
+            this._showError(`Failed to load run: ${err.message}`);
+        }
+    }
+
+    // ── XYZ drop helper ──────────────────────────────────────────────────
+
+    _createXYZNode(filename, gx, gy) {
+        const node = LiteGraph.createNode("mlp/input/ReadXYZFile");
+        if (!node) return;
+        node.pos   = [gx, gy];
+        node.title = filename;
+        // Select the just-uploaded file in the COMBO widget
+        if (node.widgets?.[0]) node.widgets[0].value = filename;
+        this.graph.add(node);
+        this.canvas.setDirty(true, true);
+    }
+
     // ── Default graph ─────────────────────────────────────────────────────
 
     _loadDefaultGraph() {
-        if (!this.nodeTypes["LoadMLPModel"] ||
-            !this.nodeTypes["CreateAtomsFromFormula"] ||
-            !this.nodeTypes["CalculateEnergyForces"]) return;
+        if (!this.nodeTypes["ReadXYZFile"]  ||
+            !this.nodeTypes["LoadMLPModel"] ||
+            !this.nodeTypes["OutputEnergy"] ||
+            !this.nodeTypes["OutputForces"]) return;
 
-        const loaderNode = LiteGraph.createNode("mlp/loaders/LoadMLPModel");
-        loaderNode.pos = [60, 120];
-        this.graph.add(loaderNode);
+        // ReadXYZFile → atoms → LoadMLPModel → result → OutputEnergy
+        //                                             ↘ OutputForces
 
-        const atomsNode = LiteGraph.createNode("mlp/input/CreateAtomsFromFormula");
-        atomsNode.pos = [60, 320];
-        this.graph.add(atomsNode);
+        const xyzNode = LiteGraph.createNode("mlp/input/ReadXYZFile");
+        xyzNode.pos = [60, 220];
+        this.graph.add(xyzNode);
 
-        const calcNode = LiteGraph.createNode("mlp/calculate/CalculateEnergyForces");
-        calcNode.pos = [420, 200];
-        this.graph.add(calcNode);
+        const modelNode = LiteGraph.createNode("mlp/inference/LoadMLPModel");
+        modelNode.pos = [360, 200];
+        this.graph.add(modelNode);
 
-        // Connect: loader.calculator → calc.calculator
-        loaderNode.connect(0, calcNode, 0);
-        // Connect: atoms.atoms → calc.atoms
-        atomsNode.connect(0, calcNode, 1);
+        const energyNode = LiteGraph.createNode("mlp/output/OutputEnergy");
+        energyNode.pos = [660, 100];
+        this.graph.add(energyNode);
+
+        const forcesNode = LiteGraph.createNode("mlp/output/OutputForces");
+        forcesNode.pos = [660, 280];
+        this.graph.add(forcesNode);
+
+        // ReadXYZFile.atoms (slot 0) → LoadMLPModel.atoms (slot 0)
+        xyzNode.connect(0, modelNode, 0);
+        // LoadMLPModel.result (slot 0) → OutputEnergy.result (slot 0)
+        modelNode.connect(0, energyNode, 0);
+        // LoadMLPModel.result (slot 0) → OutputForces.result (slot 0)
+        modelNode.connect(0, forcesNode, 0);
 
         this.canvas.setDirty(true, true);
         document.getElementById("output-content").innerHTML =
-            '<p class="empty-hint">Default graph loaded.<br>Click <b>Queue</b> to run.</p>';
+            '<p class="empty-hint">Default graph loaded.<br>Set filepath, select model, click <b>Queue</b>.</p>';
     }
 }
 
@@ -392,19 +512,19 @@ class MLPUIApp {
 const app = new MLPUIApp();
 
 window.addEventListener("load", async () => {
-    // Set litegraph defaults
-    LiteGraph.NODE_TITLE_HEIGHT   = 24;
-    LiteGraph.NODE_SLOT_HEIGHT    = 20;
-    LiteGraph.NODE_WIDTH          = 220;
+    LiteGraph.NODE_TITLE_HEIGHT    = 24;
+    LiteGraph.NODE_SLOT_HEIGHT     = 20;
+    LiteGraph.NODE_WIDTH           = 220;
     LiteGraph.DEFAULT_SHADOW_COLOR = "rgba(0,0,0,0)";
-    LiteGraph.LINK_COLOR          = "#4a9eff";
+    LiteGraph.LINK_COLOR           = "#9c6fd6";
 
-    // Register wire colours per type
+    // Register wire colours per type.
+    // Must include nodes:[] because registerNodeAndSlotType() pushes into it.
     for (const [type, color] of Object.entries(TYPE_COLORS)) {
         LiteGraph.registered_slot_in_types  = LiteGraph.registered_slot_in_types  || {};
         LiteGraph.registered_slot_out_types = LiteGraph.registered_slot_out_types || {};
-        LiteGraph.registered_slot_in_types[type]  = { color };
-        LiteGraph.registered_slot_out_types[type] = { color };
+        LiteGraph.registered_slot_in_types[type]  = { color, nodes: [] };
+        LiteGraph.registered_slot_out_types[type] = { color, nodes: [] };
     }
 
     try {

@@ -21,7 +21,9 @@
       "Bash(curl -s \"https://cdn.jsdelivr.net/npm/litegraph.js@0.7.18/build/litegraph.core.js\")",
       "Bash(curl -s \"http://127.0.0.1:8188/web/js/app.js\")",
       "Bash(1 curl:*)",
-      "Bash(curl -s -I \"http://127.0.0.1:8188/web/css/style.css\")"
+      "Bash(curl -s -I \"http://127.0.0.1:8188/web/css/style.css\")",
+      "Bash(curl -s https://cdn.jsdelivr.net/npm/litegraph.js@0.7.18/build/litegraph.core.js grep -n \"createNode\\\\|registerNodeType\\\\|LGraphNode\\\\b\\\\|registered_node_types\\\\|prototype\\\\.__proto__\" /tmp/litegraph_core.js)",
+      "Bash(: function\" | head -1 | cut -d: -f1\\)+30\\)\\)p\" /tmp/litegraph_core.js)"
     ]
   }
 }

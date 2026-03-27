@@ -17,16 +17,22 @@
 
 <!-- ── Toolbar ────────────────────────────────────────────────────────── -->
 <div id="toolbar">
-  <span class="logo">⚛ MLPUI</span>
+  <span class="logo">MLPUI</span>
+
+  <div class="tab-group">
+    <button class="tab-btn active" data-tab="inference">Inference</button>
+    <button class="tab-btn"        data-tab="training" >Training</button>
+  </div>
+
   <div class="sep"></div>
-  <button id="btn-queue" class="primary">▶ Queue Prompt</button>
+  <button id="btn-queue" class="primary">&#9654; Queue</button>
   <button id="btn-arrange">Auto Arrange</button>
   <button id="btn-clear">Clear</button>
-  <span id="status" class="status">Loading…</span>
+  <span id="status" class="status-text">Loading…</span>
 </div>
 
-<!-- ── Main ───────────────────────────────────────────────────────────── -->
-<div id="main">
+<!-- ── Inference tab ──────────────────────────────────────────────────── -->
+<div id="main" class="tab-panel">
 
   <!-- Canvas -->
   <div id="canvas-wrap">
@@ -35,12 +41,33 @@
 
   <!-- Output panel -->
   <div id="output-panel">
-    <div class="panel-header">Output</div>
-    <div id="output-content">
-      <p class="empty-hint">Right-click canvas to add nodes.<br>Connect them, then click Queue.</p>
+    <div class="panel-header">
+      <button class="panel-tab active" data-view="result">Result</button>
+      <button class="panel-tab"        data-view="history">History</button>
+    </div>
+
+    <div id="result-view" class="panel-view">
+      <div id="output-content">
+        <p class="empty-hint">Right-click canvas to add nodes.<br>Connect them, then click Queue.</p>
+      </div>
+    </div>
+
+    <div id="history-view" class="panel-view" style="display:none">
+      <div id="history-content">
+        <p class="empty-hint">No runs yet.</p>
+      </div>
     </div>
   </div>
 
+</div>
+
+<!-- ── Training tab (placeholder) ────────────────────────────────────── -->
+<div id="training-main" class="tab-panel" style="display:none">
+  <div class="coming-soon">
+    <div class="coming-soon-icon">&#9881;</div>
+    <div class="coming-soon-title">Training</div>
+    <div class="coming-soon-body">Fine-tuning interface coming soon.</div>
+  </div>
 </div>
 
 <!-- Right-click context menu -->
