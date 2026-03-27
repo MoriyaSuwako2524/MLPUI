@@ -373,13 +373,16 @@ class UMACalculator(MLPCalculator):
 @dataclass
 class CalculatorBuilder:
 
-
     model_patcher: Any
     properties: list[str] = field(default_factory=lambda: ["energy", "forces"])
     task: str | None = None
     dtype: torch.dtype = torch.float32
     device: torch.device | str | None = None
     keep_on_device: bool = True
+    # Optional per-element reference energies to override the YAML-loaded ones.
+    # Keys are atomic numbers (int), values are energies in eV.
+    # Example: {1: -13.6, 6: -148.0, 8: -2043.0}
+    atom_ref: dict[int, float] | None = None
 
     def build(self):
 
@@ -396,6 +399,10 @@ class CalculatorBuilder:
         )
         family = self._detect_model_family()
         print(f"Family: {family}")
+
+        if self.atom_ref is not None and self.task is not None:
+            self._apply_atom_ref_override()
+
         if family == "uma":
             return UMACalculator(
                 model_patcher=self.model_patcher,
@@ -418,6 +425,32 @@ class CalculatorBuilder:
             )
 
 
+
+    def _apply_atom_ref_override(self) -> None:
+        """Override the element references for self.task with self.atom_ref.
+
+        atom_ref is a dict {atomic_number: energy_eV}.  It is converted to a
+        dense list (length 120) and registered on the output_head as a new
+        dataset buffer, replacing any previously loaded refs for that dataset.
+        """
+        model = self.model_patcher.model
+        head = getattr(model, "output_head", None)
+        if head is None:
+            logger.warning("atom_ref override ignored: model has no output_head")
+            return
+
+        max_z = max(self.atom_ref.keys()) + 1
+        size = max(max_z, 120)
+        refs = [0.0] * size
+        for z, e in self.atom_ref.items():
+            refs[z] = float(e)
+
+        head.load_normalizer(
+            rmsd=float(head.normalizer_rmsd),
+            mean=float(head.normalizer_mean),
+            dataset_element_refs={self.task: refs},
+        )
+        logger.info("Applied atom_ref override for task=%s (%d elements)", self.task, len(self.atom_ref))
 
     def _get_backbone(self) -> nn.Module:
         model = self.model_patcher.model

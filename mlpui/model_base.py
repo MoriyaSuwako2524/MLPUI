@@ -1,3 +1,5 @@
+import os
+import yaml
 import torch
 from enum import Enum
 import logging
@@ -8,32 +10,87 @@ import mlpui.model_management as model_management
 import inspect
 
 
-def _load_normalizer_into_head(head, metadata: dict) -> None:
-    """Parse tasks_config from checkpoint metadata and populate head normaliser."""
-    tasks_config = metadata.get("tasks_config", None)
-    if not tasks_config:
-        return
+def _find_elem_refs_yaml() -> str | None:
+    """Find iso_atom_elem_refs.yaml relative to the mlpui package."""
+    pkg_dir = os.path.dirname(__file__)
+    path = os.path.normpath(os.path.join(pkg_dir, "..", "models", "mlp", "iso_atom_elem_refs.yaml"))
+    return path if os.path.exists(path) else None
 
+
+def _load_elem_refs_from_yaml() -> dict[str, list[float]]:
+    """Load per-dataset element references from iso_atom_elem_refs.yaml.
+
+    The file contains entries like ``oc20_elem_refs`` (list indexed by Z) and
+    ``omol_elem_refs`` (dict {Z: {charge: energy}}).  All are converted to a
+    flat list indexed by atomic number so they can be used directly as
+    ``elem_refs[atomic_numbers]`` in EnergyAndForceHead.
+    """
+    path = _find_elem_refs_yaml()
+    if path is None:
+        logging.warning("iso_atom_elem_refs.yaml not found; no YAML element references loaded.")
+        return {}
+
+    with open(path, "r") as f:
+        data = yaml.safe_load(f)
+
+    result: dict[str, list[float]] = {}
+    for key, val in data.items():
+        if not key.endswith("_elem_refs"):
+            continue
+        dataset = key[: -len("_elem_refs")]  # "oc20_elem_refs" → "oc20"
+        if isinstance(val, list):
+            result[dataset] = [float(v) for v in val]
+        elif isinstance(val, dict):
+            # omol format: {Z (int): {charge (int): energy (float)}}
+            max_z = max(int(z) for z in val.keys()) + 1
+            size = max(max_z, 120)
+            refs = [0.0] * size
+            for z_str, charge_dict in val.items():
+                z = int(z_str)
+                if isinstance(charge_dict, dict):
+                    # Use neutral (charge=0) reference
+                    energy = charge_dict.get(0, charge_dict.get("0", None))
+                    if energy is not None:
+                        refs[z] = float(energy)
+                elif isinstance(charge_dict, (int, float)):
+                    refs[z] = float(charge_dict)
+            result[dataset] = refs
+
+    logging.info("Loaded element references from YAML for datasets: %s", list(result.keys()))
+    return result
+
+
+def _load_normalizer_into_head(head, metadata: dict) -> None:
+    """Parse tasks_config from checkpoint metadata and populate head normaliser.
+
+    Element references are loaded from iso_atom_elem_refs.yaml first (primary
+    source), then overridden by any refs successfully parsed from tasks_config.
+    """
     rmsd = 1.0
     mean = 0.0
-    dataset_refs: dict[str, list[float]] = {}
 
-    for task in tasks_config:
-        if task.get("property") != "energy":
-            continue
-        norm = task.get("normalizer", {})
-        rmsd = float(norm.get("rmsd", rmsd))
-        mean = float(norm.get("mean", mean))
+    # Primary source: YAML files ship with the model directory
+    dataset_refs: dict[str, list[float]] = _load_elem_refs_from_yaml()
 
-        elem_refs_cfg = task.get("element_references")
-        if elem_refs_cfg:
-            try:
-                refs_list = elem_refs_cfg["element_references"]["_args_"][0]
-            except (KeyError, IndexError, TypeError):
-                refs_list = None
-            if refs_list is not None:
-                for dataset in task.get("datasets", []):
-                    dataset_refs[dataset] = refs_list
+    tasks_config = metadata.get("tasks_config", None) if metadata else None
+    if tasks_config:
+        for task in tasks_config:
+            if task.get("property") != "energy":
+                continue
+            norm = task.get("normalizer", {})
+            rmsd = float(norm.get("rmsd", rmsd))
+            mean = float(norm.get("mean", mean))
+
+            # If tasks_config carries element refs, let them override the YAML
+            elem_refs_cfg = task.get("element_references")
+            if elem_refs_cfg:
+                try:
+                    refs_list = elem_refs_cfg["element_references"]["_args_"][0]
+                except (KeyError, IndexError, TypeError):
+                    refs_list = None
+                if refs_list is not None:
+                    for dataset in task.get("datasets", []):
+                        dataset_refs[dataset] = refs_list
 
     head.load_normalizer(rmsd=rmsd, mean=mean, dataset_element_refs=dataset_refs)
     logging.info("Loaded normaliser rmsd=%.4f, mean=%.4f for datasets=%s",
@@ -178,8 +235,7 @@ class UMA(BaseModel):
                 logging.warning("output_head missing keys: {}".format(missing))
             if unexpected:
                 logging.warning("output_head unexpected keys: {}".format(unexpected))
-            if metadata is not None:
-                _load_normalizer_into_head(head, metadata)
+            _load_normalizer_into_head(head, metadata or {})
             self.output_head = head
             logging.info("Loaded EnergyAndForceHead (sphere_channels=%d)", sphere_channels)
 

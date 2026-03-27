@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>MLPUI</title>
+
+  <!-- LiteGraph -->
+  <link rel="stylesheet"
+        href="https://cdn.jsdelivr.net/npm/litegraph.js@0.7.18/css/litegraph.css" />
+  <script src="https://cdn.jsdelivr.net/npm/litegraph.js@0.7.18/build/litegraph.core.js"></script>
+
+  <!-- App styles -->
+  <link rel="stylesheet" href="/web/css/style.css" />
+</head>
+<body>
+
+<!-- ── Toolbar ────────────────────────────────────────────────────────── -->
+<div id="toolbar">
+  <span class="logo">⚛ MLPUI</span>
+  <div class="sep"></div>
+  <button id="btn-queue" class="primary">▶ Queue Prompt</button>
+  <button id="btn-arrange">Auto Arrange</button>
+  <button id="btn-clear">Clear</button>
+  <span id="status" class="status">Loading…</span>
+</div>
+
+<!-- ── Main ───────────────────────────────────────────────────────────── -->
+<div id="main">
+
+  <!-- Canvas -->
+  <div id="canvas-wrap">
+    <canvas id="graph-canvas"></canvas>
+  </div>
+
+  <!-- Output panel -->
+  <div id="output-panel">
+    <div class="panel-header">Output</div>
+    <div id="output-content">
+      <p class="empty-hint">Right-click canvas to add nodes.<br>Connect them, then click Queue.</p>
+    </div>
+  </div>
+
+</div>
+
+<!-- Right-click context menu -->
+<div id="ctx-menu"></div>
+
+<!-- App scripts -->
+<script src="/web/js/api.js"></script>
+<script src="/web/js/app.js"></script>
+
+</body>
+</html>

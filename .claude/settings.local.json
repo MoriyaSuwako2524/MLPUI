@@ -4,7 +4,24 @@
       "Bash(wc -l /d/calculate/github/MLPUI/mlpui/*.py)",
       "Bash(grep -r \"^class \" /d/calculate/github/MLPUI/mlpui/*.py)",
       "Bash(python -c \":*)",
-      "Bash(python:*)"
+      "Bash(python:*)",
+      "Bash(C:/Users/suwak/AppData/Local/Programs/Python/Python313/python.exe -c \"\nfrom mlpui.calculator import CalculatorBuilder\nfrom ase import Atoms\ncalc = CalculatorBuilder.from_checkpoint\\(ckpt_path='../models/mlp/uma-m-1p1.pt', task='omol'\\).build\\(\\)\nprint\\('Success:', calc\\)\n\" 2>&1)",
+      "Bash(C:/Users/suwak/AppData/Local/Programs/Python/Python313/python.exe -c \":*)",
+      "Bash(cmd /c dir \"C:\\\\Users\\\\suwak\\\\Documents\\\\calculations\\\\claude\\\\models\\\\mlp\\\\\" 2>&1)",
+      "Bash(C:/Users/suwak/AppData/Local/Programs/Python/Python313/python.exe -c \"import aiohttp; print\\(''aiohttp'', aiohttp.__version__\\)\")",
+      "Bash(C:/Users/suwak/AppData/Local/Programs/Python/Python313/python.exe -c \"import flask; print\\(''flask'', flask.__version__\\)\")",
+      "Bash(C:/Users/suwak/AppData/Local/Programs/Python/Python313/python.exe -c \"import fastapi; print\\(''fastapi ok''\\)\")",
+      "Bash(C:/Users/suwak/AppData/Local/Programs/Python/Python313/python.exe -m pip install aiohttp)",
+      "Bash(cmd //c \"taskkill /PID 5972 /F\" 2>&1)",
+      "Bash(curl -s http://127.0.0.1:8188/)",
+      "Bash(netstat -ano)",
+      "Bash(findstr 8188)",
+      "Bash(curl -s -o /dev/null -w \"%{http_code}\" \"https://cdn.jsdelivr.net/npm/litegraph.js@0.7.18/build/litegraph.core.js\")",
+      "Bash(curl -s -o /dev/null -w \"%{http_code}\" \"https://cdn.jsdelivr.net/npm/litegraph.js@0.7.18/build/litegraph.js\")",
+      "Bash(curl -s \"https://cdn.jsdelivr.net/npm/litegraph.js@0.7.18/build/litegraph.core.js\")",
+      "Bash(curl -s \"http://127.0.0.1:8188/web/js/app.js\")",
+      "Bash(1 curl:*)",
+      "Bash(curl -s -I \"http://127.0.0.1:8188/web/css/style.css\")"
     ]
   }
 }
