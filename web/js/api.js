@@ -45,4 +45,46 @@ const api = {
         if (!r.ok) throw new Error(data.error || `HTTP ${r.status}`);
         return data;
     },
+
+    // ── Dataset API ───────────────────────────────────────────────────────
+
+    async listDatasets() {
+        const r = await fetch("/datasets");
+        if (!r.ok) throw new Error(`/datasets failed: ${r.status}`);
+        return r.json();   // [{name, num_frames, fields, canonical}]
+    },
+
+    async getDatasetInfo(name) {
+        const r = await fetch(`/datasets/${encodeURIComponent(name)}`);
+        if (!r.ok) throw new Error(`/datasets/${name} failed: ${r.status}`);
+        return r.json();
+    },
+
+    async getDatasetFrames(name, start = 0, count = 50) {
+        const r = await fetch(`/datasets/${encodeURIComponent(name)}/frames?start=${start}&count=${count}`);
+        if (!r.ok) throw new Error(`/datasets/${name}/frames failed: ${r.status}`);
+        return r.json();   // [{index, formula, num_atoms, energy, max_force, ...}]
+    },
+
+    async getDatasetFrame(name, index) {
+        const r = await fetch(`/datasets/${encodeURIComponent(name)}/frame/${index}`);
+        if (!r.ok) throw new Error(`/datasets/${name}/frame/${index} failed: ${r.status}`);
+        return r.json();
+    },
+
+    async uploadDataset(file) {
+        const form = new FormData();
+        form.append("file", file);
+        const r = await fetch("/datasets/upload", { method: "POST", body: form });
+        const data = await r.json();
+        if (!r.ok) throw new Error(data.error || `HTTP ${r.status}`);
+        return data;   // { name }
+    },
+
+    async deleteDataset(name) {
+        const r = await fetch(`/datasets/${encodeURIComponent(name)}`, { method: "DELETE" });
+        const data = await r.json();
+        if (!r.ok) throw new Error(data.error || `HTTP ${r.status}`);
+        return data;
+    },
 };

@@ -8,6 +8,7 @@ const TYPE_COLORS = {
     ASE_ATOMS:       "#f0a500",
     ASE_ATOMS_LIST:  "#e07820",
     BATCH_RESULT:    "#c85cc8",
+    DATASET_RESULT:  "#4ecb71",
     FLOAT:           "#b5cea8",
     STRING:          "#ce9178",
     INT:             "#b5cea8",
@@ -19,10 +20,14 @@ const WIDGET_TYPES = new Set(["STRING", "INT", "FLOAT", "BOOLEAN"]);
 
 class MLPUIApp {
     constructor() {
-        this.graph      = new LGraph();
-        this.canvas     = null;
-        this.nodeTypes  = {};   // nodeId → object_info entry
-        this.running    = false;
+        this.graph           = new LGraph();
+        this.canvas          = null;
+        this.nodeTypes       = {};   // nodeId → object_info entry
+        this.running         = false;
+        this._dsCurrentName  = null;
+        this._dsCurrentPage  = 0;
+        this._dsPageSize     = 50;
+        this._dsInfo         = null;
     }
 
     async setup() {
@@ -59,7 +64,7 @@ class MLPUIApp {
             });
         });
 
-        // --- top toolbar tab switching (Inference / Training) ---
+        // --- top toolbar tab switching (Inference / Training / Dataset) ---
         document.querySelectorAll(".tab-btn").forEach(btn => {
             btn.addEventListener("click", () => {
                 document.querySelectorAll(".tab-btn").forEach(b => b.classList.remove("active"));
@@ -67,50 +72,25 @@ class MLPUIApp {
                 const tab = btn.dataset.tab;
                 document.getElementById("main").style.display          = tab === "inference" ? "flex" : "none";
                 document.getElementById("training-main").style.display = tab === "training"  ? "flex" : "none";
+                document.getElementById("dataset-main").style.display  = tab === "dataset"   ? "flex" : "none";
                 if (tab === "inference") this.canvas.resize();
+                if (tab === "dataset")  this._loadDatasetList();
             });
         });
 
-        // --- drag-and-drop XYZ files ---
-        el.addEventListener("dragover", e => {
-            const hasFiles = [...e.dataTransfer.types].includes("Files");
-            if (!hasFiles) return;
-            e.preventDefault();
-            e.dataTransfer.dropEffect = "copy";
-            document.getElementById("canvas-wrap").classList.add("drag-over");
-        });
-        el.addEventListener("dragleave", () => {
-            document.getElementById("canvas-wrap").classList.remove("drag-over");
-        });
-        el.addEventListener("drop", async e => {
-            e.preventDefault();
-            document.getElementById("canvas-wrap").classList.remove("drag-over");
-            const files = [...e.dataTransfer.files].filter(
-                f => /\.(xyz|extxyz)$/i.test(f.name)
-            );
-            if (!files.length) return;
-            const rect = el.getBoundingClientRect();
-            let offsetX = 0;
-            for (const file of files) {
-                try {
-                    this._setStatus(`Uploading ${file.name}…`, "running");
-                    const { filename } = await api.uploadFile(file);
-
-                    // Re-fetch the updated node definition so the COMBO reflects new file
-                    const info = await api.getObjectInfo();
-                    if (info["ReadXYZFile"]) {
-                        this.nodeTypes["ReadXYZFile"] = info["ReadXYZFile"];
-                        this._registerNodeType("ReadXYZFile", info["ReadXYZFile"]);
-                    }
-
-                    const gx = (e.clientX - rect.left)  / this.canvas.ds.scale - this.canvas.ds.offset[0] + offsetX;
-                    const gy = (e.clientY - rect.top)   / this.canvas.ds.scale - this.canvas.ds.offset[1];
-                    this._createXYZNode(filename, gx, gy);
-                    offsetX += 260;
-                    this._setStatus("Ready");
-                } catch (err) {
-                    this._setStatus(`Upload failed: ${err.message}`, "error");
-                }
+        // --- dataset upload input ---
+        document.getElementById("ds-upload-input").addEventListener("change", async e => {
+            const file = e.target.files[0];
+            if (!file) return;
+            e.target.value = "";
+            this._setStatus(`Uploading ${file.name}…`, "running");
+            try {
+                const { name } = await api.uploadDataset(file);
+                this._setStatus("Ready");
+                await this._loadDatasetList();
+                this._openDataset(name);
+            } catch (err) {
+                this._setStatus(`Upload failed: ${err.message}`, "error");
             }
         });
 
@@ -296,20 +276,36 @@ class MLPUIApp {
             title.textContent = `${data.class_type}  (node ${nodeId})`;
             card.appendChild(title);
 
-            const body = document.createElement("div");
-            body.className = "card-body";
+            const textParts = [];
+            const images    = [];
 
             for (const out of data.outputs ?? []) {
                 if (out.type === "STRING") {
-                    // Pre-formatted text — show directly
-                    if (body.textContent) body.textContent += "\n\n";
-                    body.textContent += out.value;
+                    if (out.value) textParts.push(out.value);
+                } else if (out.type === "IMAGE") {
+                    if (out.value && out.value.startsWith("data:")) {
+                        images.push({ name: out.name, src: out.value });
+                    }
                 } else {
-                    body.textContent += `${out.name}: ${out.value}\n`;
+                    textParts.push(`${out.name}: ${out.value}`);
                 }
             }
 
-            card.appendChild(body);
+            if (textParts.length) {
+                const body = document.createElement("div");
+                body.className = "card-body";
+                body.textContent = textParts.join("\n\n");
+                card.appendChild(body);
+            }
+
+            for (const { name, src } of images) {
+                const img = document.createElement("img");
+                img.src       = src;
+                img.alt       = name;
+                img.className = "result-plot";
+                card.appendChild(img);
+            }
+
             container.appendChild(card);
         }
     }
@@ -454,35 +450,213 @@ class MLPUIApp {
         }
     }
 
-    // ── XYZ drop helper ──────────────────────────────────────────────────
+    // ── Dataset tab ───────────────────────────────────────────────────────
 
-    _createXYZNode(filename, gx, gy) {
-        const node = LiteGraph.createNode("mlp/input/ReadXYZFile");
-        if (!node) return;
-        node.pos   = [gx, gy];
-        node.title = filename;
-        // Select the just-uploaded file in the COMBO widget
-        if (node.widgets?.[0]) node.widgets[0].value = filename;
-        this.graph.add(node);
-        this.canvas.setDirty(true, true);
+    async _loadDatasetList() {
+        const list = document.getElementById("ds-list");
+        list.innerHTML = '<p class="empty-hint" style="margin-top:20px">Loading…</p>';
+        try {
+            const datasets = await api.listDatasets();
+            list.innerHTML = "";
+            if (!datasets.length) {
+                list.innerHTML = '<p class="empty-hint" style="margin-top:20px">No datasets.</p>';
+                return;
+            }
+            for (const ds of datasets) {
+                const item = document.createElement("div");
+                item.className = "ds-list-item";
+                if (ds.name === this._dsCurrentName) item.classList.add("active");
+                item.dataset.name = ds.name;
+                item.innerHTML =
+                    `<span class="ds-name">${ds.name}</span>` +
+                    `<span class="ds-meta">${ds.num_frames ?? "?"} frames</span>`;
+                item.addEventListener("click", () => this._openDataset(ds.name));
+                list.appendChild(item);
+            }
+        } catch (err) {
+            list.innerHTML = `<p class="empty-hint" style="margin-top:20px">Error: ${err.message}</p>`;
+        }
+    }
+
+    async _openDataset(name) {
+        this._dsCurrentName = name;
+        this._dsCurrentPage = 0;
+
+        // Highlight active item in sidebar
+        document.querySelectorAll(".ds-list-item").forEach(el => {
+            el.classList.toggle("active", el.dataset.name === name);
+        });
+
+        document.getElementById("ds-placeholder").style.display = "none";
+        const content = document.getElementById("ds-content");
+        content.style.display = "flex";
+
+        const header = document.getElementById("ds-header");
+        header.innerHTML = `<span class="ds-hdr-title">${name}</span><span style="color:var(--text-dim);font-size:11px">Loading…</span>`;
+
+        try {
+            const info = await api.getDatasetInfo(name);
+            this._dsInfo = info;
+            header.innerHTML =
+                `<span class="ds-hdr-title">${name}</span>` +
+                `<span class="ds-hdr-badge">${info.num_frames} frames</span>` +
+                `<span style="color:var(--text-dim);font-size:11px">fields: ${Object.keys(info.fields ?? {}).join(", ")}</span>`;
+            await this._loadDatasetPage(0);
+        } catch (err) {
+            header.innerHTML = `<span class="ds-hdr-title">${name}</span><span style="color:#f44336"> Error: ${err.message}</span>`;
+        }
+    }
+
+    async _loadDatasetPage(page) {
+        const start = page * this._dsPageSize;
+        const tbody = document.getElementById("ds-tbody");
+        const thead = document.getElementById("ds-thead-row");
+        tbody.innerHTML = '<tr><td colspan="99" style="text-align:center;padding:12px">Loading…</td></tr>';
+
+        try {
+            const frames = await api.getDatasetFrames(this._dsCurrentName, start, this._dsPageSize);
+            if (!frames.length) {
+                tbody.innerHTML = '<tr><td colspan="99" style="text-align:center;padding:12px">No frames.</td></tr>';
+                return;
+            }
+            // Build header from first frame keys
+            const cols = Object.keys(frames[0]).filter(k => k !== "index");
+            thead.innerHTML = "<th>#</th>" + cols.map(c => `<th>${c}</th>`).join("");
+
+            const INT_COLS   = new Set(["num_atoms"]);
+            const FLOAT_COLS = new Set(["energy", "max_force", "dipole_norm", "total_charge"]);
+
+            tbody.innerHTML = "";
+            for (const frame of frames) {
+                const tr = document.createElement("tr");
+                tr.dataset.index = frame.index;
+                tr.innerHTML = `<td>${frame.index}</td>` +
+                    cols.map(c => {
+                        const v = frame[c];
+                        if (v == null) return "<td>—</td>";
+                        if (typeof v === "number") {
+                            if (INT_COLS.has(c))   return `<td>${v}</td>`;
+                            if (FLOAT_COLS.has(c)) return `<td>${v.toFixed(6)}</td>`;
+                            return `<td>${v}</td>`;
+                        }
+                        return `<td>${v}</td>`;
+                    }).join("");
+                tr.addEventListener("click", () => this._loadFrameDetail(frame.index, tr));
+                tbody.appendChild(tr);
+            }
+
+            // Pagination
+            const totalPages = this._dsInfo ? Math.ceil(this._dsInfo.num_frames / this._dsPageSize) : 1;
+            const pg = document.getElementById("ds-pagination");
+            pg.innerHTML = "";
+            if (totalPages > 1) {
+                const prev = document.createElement("button");
+                prev.textContent = "← Prev";
+                prev.disabled = page === 0;
+                prev.addEventListener("click", () => { this._dsCurrentPage--; this._loadDatasetPage(this._dsCurrentPage); });
+                pg.appendChild(prev);
+
+                const label = document.createElement("span");
+                label.textContent = ` Page ${page + 1} / ${totalPages} `;
+                pg.appendChild(label);
+
+                const next = document.createElement("button");
+                next.textContent = "Next →";
+                next.disabled = page >= totalPages - 1;
+                next.addEventListener("click", () => { this._dsCurrentPage++; this._loadDatasetPage(this._dsCurrentPage); });
+                pg.appendChild(next);
+            }
+        } catch (err) {
+            tbody.innerHTML = `<tr><td colspan="99" style="color:#f44336;padding:12px">Error: ${err.message}</td></tr>`;
+        }
+    }
+
+    _fmtNum(x) {
+        if (typeof x !== "number") return String(x);
+        if (Number.isInteger(x))   return String(x);
+        return x.toFixed(6);
+    }
+
+    _fmtArray(v) {
+        // v is a JS array (possibly nested)
+        const is2D = Array.isArray(v[0]);
+        if (is2D) {
+            const rows = v.slice(0, 30);
+            const more = v.length > 30 ? `\n… (${v.length} rows total)` : "";
+            return rows.map(row =>
+                row.map(x => (typeof x === "number" ? x.toFixed(6).padStart(14) : String(x))).join("  ")
+            ).join("\n") + more;
+        }
+        // 1-D
+        const flat = v.slice(0, 60);
+        const more = v.length > 60 ? `, … (${v.length} total)` : "";
+        return flat.map(x => this._fmtNum(x)).join(", ") + more;
+    }
+
+    async _loadFrameDetail(index, rowEl) {
+        document.querySelectorAll("#ds-tbody tr").forEach(r => r.classList.remove("active"));
+        rowEl.classList.add("active");
+
+        const panel = document.getElementById("ds-frame-panel");
+        panel.innerHTML = '<div class="ds-frame-panel-hint">Loading frame…</div>';
+        try {
+            const frame = await api.getDatasetFrame(this._dsCurrentName, index);
+
+            // Separate scalars from arrays for layout
+            const scalars = [];
+            const arrays  = [];
+            for (const [k, v] of Object.entries(frame)) {
+                if (k === "index") continue;
+                if (Array.isArray(v)) arrays.push([k, v]);
+                else scalars.push([k, v]);
+            }
+
+            // Title row
+            const formula = frame.formula ?? "";
+            let html = `<div class="ds-frame-title">Frame ${index}${formula ? "  " + formula : ""}</div>`;
+
+            // Scalar grid
+            if (scalars.length) {
+                html += `<div class="ds-frame-scalars">`;
+                for (const [k, v] of scalars) {
+                    const display = v == null ? "—" : this._fmtNum(v);
+                    html += `<div class="ds-scalar-cell"><span class="ds-field-key">${k}</span><span class="ds-scalar-val">${display}</span></div>`;
+                }
+                html += `</div>`;
+            }
+
+            // Array fields
+            html += `<div class="ds-frame-fields">`;
+            for (const [k, v] of arrays) {
+                const shape = Array.isArray(v[0]) ? `${v.length}×${v[0].length}` : `${v.length}`;
+                html += `<div class="ds-field-row">` +
+                    `<span class="ds-field-key">${k} <span style="font-weight:400;text-transform:none">[${shape}]</span></span>` +
+                    `<pre class="ds-field-val">${this._fmtArray(v)}</pre>` +
+                    `</div>`;
+            }
+            html += `</div>`;
+
+            panel.innerHTML = html;
+        } catch (err) {
+            panel.innerHTML = `<div class="ds-frame-panel-hint" style="color:#f44336">Error: ${err.message}</div>`;
+        }
     }
 
     // ── Default graph ─────────────────────────────────────────────────────
 
     _loadDefaultGraph() {
         if (!this.nodeTypes["ReadXYZFile"]  ||
-            !this.nodeTypes["LoadMLPModel"] ||
+            !this.nodeTypes["RunMLPModel"] ||
             !this.nodeTypes["OutputEnergy"] ||
             !this.nodeTypes["OutputForces"]) return;
 
-        // ReadXYZFile → atoms → LoadMLPModel → result → OutputEnergy
-        //                                             ↘ OutputForces
+        // ReadXYZFile → atoms_list → RunMLPModel → result → OutputEnergy / OutputForces
 
         const xyzNode = LiteGraph.createNode("mlp/input/ReadXYZFile");
         xyzNode.pos = [60, 220];
         this.graph.add(xyzNode);
 
-        const modelNode = LiteGraph.createNode("mlp/inference/LoadMLPModel");
+        const modelNode = LiteGraph.createNode("mlp/inference/RunMLPModel");
         modelNode.pos = [360, 200];
         this.graph.add(modelNode);
 

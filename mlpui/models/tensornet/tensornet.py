@@ -1,14 +1,17 @@
 import torch
 from typing import Optional, Tuple
 from torch import Tensor, nn
-from torchmdnet.models.utils import (
+from mlpui.models.tensornet.utils import (
     CosineCutoff,
     OptimizedDistance,
     rbf_class_mapping,
     act_class_mapping,
+    scatter,
 )
 
-__all__ = ["TensorNet"]
+__all__ = ["TensorNet_Ext"]
+torch.set_float32_matmul_precision("high")
+torch.backends.cuda.matmul.allow_tf32 = True
 
 
 def vector_to_skewtensor(vector):
@@ -42,18 +45,6 @@ def vector_to_symtensor(vector):
     S = 0.5 * (tensor + tensor.transpose(-2, -1)) - I
     return S
 
-def skewtensor_to_vector(A):
-    """
-    Map an antisymmetric tensor A to its pseudovector w s.t.
-    [ [0, -wz,  wy],
-      [wz,  0, -wx],
-      [-wy, wx, 0] ] == A
-    A: [..., 3, 3]  ->  w: [..., 3]
-    """
-    wx = A[..., 2, 1]
-    wy = A[..., 0, 2]
-    wz = -A[..., 0, 1]
-    return torch.stack((wx, wy, wz), dim=-1)
 
 def decompose_tensor(tensor):
     """Full tensor decomposition into irreducible components."""
@@ -70,7 +61,38 @@ def tensor_norm(tensor):
     return (tensor**2).sum((-2, -1))
 
 
-class TensorNet(nn.Module):
+def ext_distance(
+    pos: Tensor, ext_pos: Tensor, batch: Tensor, cutoff: float
+) -> Tuple[Tensor, Tensor, Tensor, Tensor]:
+    """Computes distances between atoms and external charges."""
+    batch_size = int(batch.max()) + 1
+    pos = pos.reshape(batch_size, -1, 3)
+    ext_pos = ext_pos.reshape(batch_size, -1, 3)
+    ext_index = torch.vstack(
+        (
+            torch.arange(batch_size, device=pos.device).repeat_interleave(
+                pos.shape[1] * ext_pos.shape[1]
+            ),
+            torch.arange(ext_pos.shape[1], device=pos.device).repeat(
+                batch_size * pos.shape[1]
+            ),
+        )
+    )
+    edge_index = torch.arange(
+        batch_size * pos.shape[1], device=pos.device
+    ).repeat_interleave(ext_pos.shape[1])
+    ext_vec = pos.unsqueeze(2) - ext_pos.unsqueeze(1)
+    ext_vec = ext_vec.reshape(-1, 3)
+    ext_weight = torch.norm(ext_vec, dim=-1)
+    mask = ext_weight < cutoff
+    ext_index = ext_index[:, mask]
+    ext_weight = ext_weight[mask]
+    ext_vec = ext_vec[mask]
+    edge_index = edge_index[mask]
+    return ext_index, ext_weight, ext_vec, edge_index
+
+
+class TensorNet_Ext(nn.Module):
     r"""TensorNet's architecture. From
     TensorNet: Cartesian Tensor Representations for Efficient Learning of Molecular Potentials; G. Simeon and G. de Fabritiis.
     NeurIPS 2023.
@@ -121,9 +143,6 @@ class TensorNet(nn.Module):
             where `box_vectors[0] = a`, `box_vectors[1] = b`, and `box_vectors[2] = c`.
             If this is omitted, periodic boundary conditions are not applied.
             (default: :obj:`None`)
-        static_shapes (bool, optional): Whether to enforce static shapes.
-            Makes the model CUDA-graph compatible if check_errors is set to False.
-            (default: :obj:`True`)
         check_errors (bool, optional): Whether to check for errors in the distance module.
             (default: :obj:`True`)
     """
@@ -138,15 +157,19 @@ class TensorNet(nn.Module):
         activation="silu",
         cutoff_lower=0,
         cutoff_upper=4.5,
+        ext_num_rbf=32,
+        ext_rbf_type="expnorm",
+        ext_trainable_rbf=False,
+        ext_cutoff_lower=0,
+        ext_cutoff_upper=10.0,
         max_num_neighbors=64,
         max_z=128,
         equivariance_invariance_group="O(3)",
-        static_shapes=True,
         check_errors=True,
         dtype=torch.float32,
         box_vecs=None,
     ):
-        super(TensorNet, self).__init__()
+        super(TensorNet_Ext, self).__init__()
 
         assert rbf_type in rbf_class_mapping, (
             f'Unknown RBF type "{rbf_type}". '
@@ -198,13 +221,22 @@ class TensorNet(nn.Module):
                         dtype,
                     )
                 )
+        self.ext_layer = Interaction_Ext(
+            ext_num_rbf,
+            ext_rbf_type,
+            ext_trainable_rbf,
+            hidden_channels,
+            act_class,
+            ext_cutoff_lower,
+            ext_cutoff_upper,
+            dtype,
+        )
         self.linear = nn.Linear(3 * hidden_channels, hidden_channels, dtype=dtype)
         self.out_norm = nn.LayerNorm(3 * hidden_channels, dtype=dtype)
         self.act = act_class()
         # Resize to fit set to false ensures Distance returns a statically-shaped tensor of size max_num_pairs=pos.size*max_num_neigbors
         # negative max_num_pairs argument means "per particle"
         # long_edge_index set to False saves memory and spares some kernel launches by keeping neighbor indices as int32.
-        self.static_shapes = static_shapes
         self.distance = OptimizedDistance(
             cutoff_lower,
             cutoff_upper,
@@ -212,7 +244,7 @@ class TensorNet(nn.Module):
             return_vecs=True,
             loop=True,
             check_errors=check_errors,
-            resize_to_fit=not self.static_shapes,
+            resize_to_fit=True,
             box=box_vecs,
             long_edge_index=True,
         )
@@ -230,6 +262,8 @@ class TensorNet(nn.Module):
         self,
         z: Tensor,
         pos: Tensor,
+        ext_pos: Tensor,
+        ext_charge: Tensor,
         batch: Tensor,
         box: Optional[Tensor] = None,
         q: Optional[Tensor] = None,
@@ -241,43 +275,30 @@ class TensorNet(nn.Module):
         assert (
             edge_vec is not None
         ), "Distance module did not return directional information"
-        # Distance module returns -1 for non-existing edges, to avoid having to resize the tensors when we want to ensure static shapes (for CUDA graphs) we make all non-existing edges pertain to a ghost atom
-        # Total charge q is a molecule-wise property. We transform it into an atom-wise property, with all atoms belonging to the same molecule being assigned the same charge q
-        if q is None:
-            q = torch.zeros_like(z, device=z.device, dtype=z.dtype)
-        else:
-            q = q[batch]
-        zp = z
-        if self.static_shapes:
-            mask = (edge_index[0] < 0).unsqueeze(0).expand_as(edge_index)
-            zp = torch.cat((z, torch.zeros(1, device=z.device, dtype=z.dtype)), dim=0)
-            q = torch.cat((q, torch.zeros(1, device=q.device, dtype=q.dtype)), dim=0)
-            # I trick the model into thinking that the masked edges pertain to the extra atom
-            # WARNING: This can hurt performance if max_num_pairs >> actual_num_pairs
-            edge_index = edge_index.masked_fill(mask, z.shape[0])
-            edge_weight = edge_weight.masked_fill(mask[0], 0)
-            edge_vec = edge_vec.masked_fill(
-                mask[0].unsqueeze(-1).expand_as(edge_vec), 0
-            )
         edge_attr = self.distance_expansion(edge_weight)
         mask = edge_index[0] == edge_index[1]
         # Normalizing edge vectors by their length can result in NaNs, breaking Autograd.
         # I avoid dividing by zero by setting the weight of self edges and self loops to 1
         edge_vec = edge_vec / edge_weight.masked_fill(mask, 1).unsqueeze(1)
-        X = self.tensor_embedding(zp, edge_index, edge_weight, edge_vec, edge_attr)
+        X = self.tensor_embedding(z, edge_index, edge_weight, edge_vec, edge_attr)
+        # Interaction from external charges
+        msg_ext = self.ext_layer(pos, ext_pos, ext_charge, batch)
+        # Interaction layers
         for layer in self.layers:
-            X = layer(X, edge_index, edge_weight, edge_attr, q)
+            X = layer(X, edge_index, edge_weight, edge_attr, msg_ext)
         I, A, S = decompose_tensor(X)
         x = torch.cat((tensor_norm(I), tensor_norm(A), tensor_norm(S)), dim=-1)
         x = self.out_norm(x)
         x = self.act(self.linear((x)))
-        # # Remove the extra atom
-        if self.static_shapes:
-            x = x[:-1]
         return x, None, z, pos, batch
 
 
 class TensorEmbedding(nn.Module):
+    """Tensor embedding layer.
+
+    :meta private:
+    """
+
     def __init__(
         self,
         hidden_channels,
@@ -405,6 +426,75 @@ def tensor_message_passing(
     return tensor_m
 
 
+class Interaction_Ext(nn.Module):
+    def __init__(
+        self,
+        num_rbf,
+        rbf_type,
+        trainable_rbf,
+        hidden_channels,
+        activation,
+        cutoff_lower,
+        cutoff_upper,
+        dtype=torch.float32,
+    ):
+        super(Interaction_Ext, self).__init__()
+
+        self.num_rbf = num_rbf
+        self.hidden_channels = hidden_channels
+        self.cutoff = CosineCutoff(cutoff_lower, cutoff_upper)
+        self.ext_distance_expansion = rbf_class_mapping[rbf_type](
+            cutoff_lower, cutoff_upper, num_rbf, trainable_rbf
+        )
+        self.linears_scalar = nn.ModuleList()
+        self.linears_scalar.append(
+            nn.Linear(num_rbf, hidden_channels, bias=True, dtype=dtype)
+        )
+        self.linears_scalar.append(
+            nn.Linear(hidden_channels, 2 * hidden_channels, bias=True, dtype=dtype)
+        )
+        self.linears_scalar.append(
+            nn.Linear(2 * hidden_channels, 3 * hidden_channels, bias=True, dtype=dtype)
+        )
+        self.act = activation()
+        self.reset_parameters()
+
+    def reset_parameters(self):
+        for linear in self.linears_scalar:
+            linear.reset_parameters()
+
+    def forward(self, pos, ext_pos, ext_charge, batch):
+        cutoff = self.cutoff.cutoff_upper
+        ext_index, ext_weight, ext_vec, edge_index = ext_distance(pos, ext_pos, batch, cutoff)
+        batch_size = int(batch.max()) + 1
+        ext_charge = ext_charge.reshape(batch_size, -1, 1)
+        ext_charge = ext_charge[(ext_index[0], ext_index[1])]
+
+        # Expand distances with radial basis functions
+        ext_attr = self.ext_distance_expansion(ext_weight)
+
+        for linear_scalar in self.linears_scalar:
+            ext_attr = self.act(linear_scalar(ext_attr))
+        ext_attr = (ext_attr * self.cutoff(ext_weight).unsqueeze(-1) * ext_charge).reshape(
+           -1, self.hidden_channels, 3
+        )
+        ext_vec = (ext_vec / ext_weight.unsqueeze(-1)).reshape(-1, 3)
+        Ie = (
+            torch.eye(3, 3, device=ext_vec.device, dtype=ext_vec.dtype)[None, None, :, :]
+            * ext_attr[..., 0, None, None]
+        )
+        Ae = (
+            vector_to_skewtensor(ext_vec)[..., None, :, :]
+            * ext_attr[..., 1, None, None]
+        )
+        Se = (
+            vector_to_symtensor(ext_vec)[..., None, :, :]
+            * ext_attr[..., 2, None, None]
+        )
+        msg_ext = scatter((Ie + Ae + Se), edge_index)
+        return msg_ext
+
+
 class Interaction(nn.Module):
     """Interaction layer.
 
@@ -457,7 +547,7 @@ class Interaction(nn.Module):
         edge_index: Tensor,
         edge_weight: Tensor,
         edge_attr: Tensor,
-        q: Tensor,
+        msg_ext: Optional[Tensor] = None,
     ) -> Tensor:
         C = self.cutoff(edge_weight)
         for linear_scalar in self.linears_scalar:
@@ -481,10 +571,12 @@ class Interaction(nn.Module):
             edge_index, edge_attr[..., 2, None, None], S, X.shape[0]
         )
         msg = Im + Am + Sm
+        if msg_ext is not None:
+            msg = msg + msg_ext
         if self.equivariance_invariance_group == "O(3)":
             A = torch.matmul(msg, Y)
             B = torch.matmul(Y, msg)
-            I, A, S = decompose_tensor((1 + 0.1 * q[..., None, None, None]) * (A + B))
+            I, A, S = decompose_tensor(A + B)
         if self.equivariance_invariance_group == "SO(3)":
             B = torch.matmul(Y, msg)
             I, A, S = decompose_tensor(2 * B)
@@ -494,5 +586,5 @@ class Interaction(nn.Module):
         A = self.linears_tensor[4](A.permute(0, 2, 3, 1)).permute(0, 3, 1, 2)
         S = self.linears_tensor[5](S.permute(0, 2, 3, 1)).permute(0, 3, 1, 2)
         dX = I + A + S
-        X = X + dX + (1 + 0.1 * q[..., None, None, None]) * torch.matrix_power(dX, 2)
+        X = X + dX + torch.matrix_power(dX, 2)
         return X

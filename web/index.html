@@ -22,6 +22,7 @@
   <div class="tab-group">
     <button class="tab-btn active" data-tab="inference">Inference</button>
     <button class="tab-btn"        data-tab="training" >Training</button>
+    <button class="tab-btn"        data-tab="dataset"  >Dataset</button>
   </div>
 
   <div class="sep"></div>
@@ -68,6 +69,56 @@
     <div class="coming-soon-title">Training</div>
     <div class="coming-soon-body">Fine-tuning interface coming soon.</div>
   </div>
+</div>
+
+<!-- ── Dataset tab ─────────────────────────────────────────────────────── -->
+<div id="dataset-main" class="tab-panel" style="display:none">
+
+  <!-- Sidebar: dataset list + upload -->
+  <div id="ds-sidebar">
+    <div class="ds-sidebar-header">
+      <span>Datasets</span>
+      <label class="ds-upload-label" title="Upload .npz file">
+        + Upload
+        <input type="file" id="ds-upload-input" accept=".npz" style="display:none" />
+      </label>
+    </div>
+    <div id="ds-list">
+      <p class="empty-hint" style="margin-top:20px">No datasets.</p>
+    </div>
+  </div>
+
+  <!-- Main detail area -->
+  <div id="ds-detail">
+    <div id="ds-placeholder" class="ds-placeholder" style="display:flex">
+      <div class="coming-soon-icon">&#128190;</div>
+      <div class="coming-soon-title">No dataset selected</div>
+      <div class="coming-soon-body">Upload a .npz file or select a dataset from the list.</div>
+    </div>
+
+    <div id="ds-content" style="display:none; flex-direction:column; height:100%; overflow:hidden">
+      <!-- Header row -->
+      <div id="ds-header" class="ds-header"></div>
+
+      <!-- Split: table (top) + frame detail (bottom) -->
+      <div id="ds-body" class="ds-body">
+        <!-- Frame table -->
+        <div id="ds-table-wrap" class="ds-table-wrap">
+          <table id="ds-table" class="ds-table">
+            <thead><tr id="ds-thead-row"></tr></thead>
+            <tbody id="ds-tbody"></tbody>
+          </table>
+          <div id="ds-pagination" class="ds-pagination"></div>
+        </div>
+
+        <!-- Frame detail panel -->
+        <div id="ds-frame-panel" class="ds-frame-panel">
+          <div class="ds-frame-panel-hint">Click a row to inspect the frame.</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
 </div>
 
 <!-- Right-click context menu -->

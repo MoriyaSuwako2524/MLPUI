@@ -13,14 +13,16 @@ async def no_cache(request, handler):
     return response
 
 
-_uploads = os.path.join(_root, "uploads")
+_uploads  = os.path.join(_root, "uploads")
+_datasets = os.path.join(_root, "dataset")
 
 
 async def create_app() -> web.Application:
     from app.builtin_nodes import load_all_nodes
     load_all_nodes()
 
-    os.makedirs(_uploads, exist_ok=True)
+    os.makedirs(_uploads,  exist_ok=True)
+    os.makedirs(_datasets, exist_ok=True)
 
     app = web.Application(
         middlewares=[no_cache],
@@ -34,6 +36,13 @@ async def create_app() -> web.Application:
     app.router.add_get("/history",             handle_history)
     app.router.add_get("/history/{run_id}",    handle_history_run)
     app.router.add_get("/models/{folder}", handle_model_list)
+    # Dataset endpoints
+    app.router.add_get("/datasets",                    handle_dataset_list)
+    app.router.add_get("/datasets/{name}",             handle_dataset_info)
+    app.router.add_get("/datasets/{name}/frames",      handle_dataset_frames)
+    app.router.add_get("/datasets/{name}/frame/{idx}", handle_dataset_frame)
+    app.router.add_post("/datasets/upload",            handle_dataset_upload)
+    app.router.add_delete("/datasets/{name}",          handle_dataset_delete)
     app.router.add_static("/web",          _web, show_index=False)
     return app
 
@@ -135,3 +144,88 @@ async def handle_model_list(request: web.Request) -> web.Response:
     import app.folder_paths as fp
     files = fp.get_filename_list(request.match_info["folder"])
     return web.json_response(files)
+
+
+# ── Dataset handlers ──────────────────────────────────────────────────────────
+
+def _get_dm():
+    from mlpui.dataset import DatasetManager
+    return DatasetManager(_datasets)
+
+
+async def handle_dataset_list(request: web.Request) -> web.Response:
+    try:
+        return web.json_response(_get_dm().list_datasets())
+    except Exception as exc:
+        return web.json_response({"error": str(exc)}, status=500)
+
+
+async def handle_dataset_info(request: web.Request) -> web.Response:
+    name = request.match_info["name"]
+    try:
+        return web.json_response(_get_dm().get_info(name))
+    except FileNotFoundError as exc:
+        return web.json_response({"error": str(exc)}, status=404)
+    except Exception as exc:
+        return web.json_response({"error": str(exc)}, status=500)
+
+
+async def handle_dataset_frames(request: web.Request) -> web.Response:
+    name  = request.match_info["name"]
+    start = int(request.rel_url.query.get("start", 0))
+    count = int(request.rel_url.query.get("count", 50))
+    count = min(count, 200)  # cap per request
+    try:
+        frames = _get_dm().get_frames(name, start, count)
+        return web.json_response(frames)
+    except FileNotFoundError as exc:
+        return web.json_response({"error": str(exc)}, status=404)
+    except Exception as exc:
+        import traceback
+        return web.json_response(
+            {"error": str(exc), "traceback": traceback.format_exc()}, status=500)
+
+
+async def handle_dataset_frame(request: web.Request) -> web.Response:
+    name = request.match_info["name"]
+    try:
+        idx = int(request.match_info["idx"])
+    except ValueError:
+        return web.json_response({"error": "invalid index"}, status=400)
+    try:
+        return web.json_response(_get_dm().get_frame(name, idx))
+    except FileNotFoundError as exc:
+        return web.json_response({"error": str(exc)}, status=404)
+    except IndexError as exc:
+        return web.json_response({"error": str(exc)}, status=400)
+    except Exception as exc:
+        import traceback
+        return web.json_response(
+            {"error": str(exc), "traceback": traceback.format_exc()}, status=500)
+
+
+async def handle_dataset_upload(request: web.Request) -> web.Response:
+    try:
+        data = await request.post()
+        file_field = data.get("file")
+        if not file_field or not hasattr(file_field, "filename"):
+            return web.json_response({"error": "no file field"}, status=400)
+        filename = os.path.basename(file_field.filename)
+        content  = file_field.file.read()
+        name = _get_dm().upload(filename, content)
+        return web.json_response({"name": name})
+    except Exception as exc:
+        import traceback
+        return web.json_response(
+            {"error": str(exc), "traceback": traceback.format_exc()}, status=500)
+
+
+async def handle_dataset_delete(request: web.Request) -> web.Response:
+    name = request.match_info["name"]
+    try:
+        _get_dm().delete(name)
+        return web.json_response({"deleted": name})
+    except FileNotFoundError as exc:
+        return web.json_response({"error": str(exc)}, status=404)
+    except Exception as exc:
+        return web.json_response({"error": str(exc)}, status=500)

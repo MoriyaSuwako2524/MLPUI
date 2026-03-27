@@ -3,8 +3,9 @@ import os
 # Project root  (parent of app/)
 _base_path = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
-models_dir  = os.path.join(_base_path, "models")
-uploads_dir = os.path.join(_base_path, "uploads")
+models_dir   = os.path.join(_base_path, "models")
+uploads_dir  = os.path.join(_base_path, "uploads")
+datasets_dir = os.path.join(_base_path, "dataset")
 
 _MODEL_EXTENSIONS = {".pt", ".pth", ".ckpt", ".safetensors"}
 _XYZ_EXTENSIONS   = {".xyz", ".extxyz"}

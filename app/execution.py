@@ -71,13 +71,22 @@ def execute_prompt(prompt: dict) -> dict:
 
 
 def _save_run(prompt: dict, result: dict) -> None:
+    import copy
     os.makedirs(_output_dir, exist_ok=True)
     run_id = datetime.now().strftime("%Y%m%d_%H%M%S_%f")[:20]
+
+    # Strip IMAGE payloads from history to keep files small
+    saved_result = copy.deepcopy(result)
+    for node_data in saved_result.get("ui", {}).values():
+        for out in node_data.get("outputs", []):
+            if out.get("type") == "IMAGE" and isinstance(out.get("value"), str):
+                out["value"] = "(image not stored in history)"
+
     data = {
         "run_id":    run_id,
         "timestamp": datetime.now().isoformat(timespec="seconds"),
         "prompt":    prompt,
-        "result":    result,
+        "result":    saved_result,
     }
     path = os.path.join(_output_dir, f"{run_id}.json")
     with open(path, "w", encoding="utf-8") as f:
