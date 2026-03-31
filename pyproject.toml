@@ -13,7 +13,6 @@ authors = [
 ]
 requires-python = ">=3.10"
 
-
 dependencies = [
     "torch>=2.0.0",
     "pytorch-lightning>=2.0.0",
@@ -21,3 +20,6 @@ dependencies = [
     "numpy>=1.20.0",
     "pyyaml>=6.0",
 ]
+
+[tool.setuptools.packages.find]
+include = ["mlpui*"]
