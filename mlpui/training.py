@@ -1,4 +1,4 @@
-"""Unified .npy training interface for the optional TorchMD-Net/NewtonNet forks."""
+"""Unified .npy training interface for bundled TorchMD-Net/NewtonNet models."""
 from dataclasses import dataclass, field
 from pathlib import Path
 import copy
@@ -77,10 +77,10 @@ class Trainer:
                 device=self.config.device, dtype=self.config.dtype,
                 trusted_checkpoint=trusted_checkpoint).model
         elif self.family == "torchmdnet":
-            from torchmdnet.models.model import create_model
+            from mlpui.models.torchmdnet.models.model import create_model
             self.model = create_model(copy.deepcopy(self.model_config))
         else:
-            from newtonnet.models.newtonnet import NewtonNet
+            from mlpui.models.newtonnet.models.newtonnet import NewtonNet
             self.model = NewtonNet(**self.model_config)
         self.model.to(device=self.config.device, dtype=self.config.dtype)
         if self.family == "torchmdnet":

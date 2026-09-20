@@ -1,40 +1,54 @@
 # MLPUI
 
-Python interfaces for machine-learning interatomic potentials. The existing UMA
-implementation is experimental. TorchMD-Net and NewtonNet are optional backends,
-using these forks rather than copying their model implementations into MLPUI:
-
-- <https://github.com/MoriyaSuwako2524/torchmd-net>
-- <https://github.com/MoriyaSuwako2524/NewtonNet>
+Python interfaces for machine-learning interatomic potentials. UMA, NewtonNet
+and TorchMD-Net network implementations are included under `mlpui/models/`.
+The UMA implementation remains experimental. Bundled fork revisions, local
+changes and third-party licenses are recorded in
+[models/VENDORED_MODELS.md](mlpui/models/VENDORED_MODELS.md).
 
 ## Install
 
-Use a separate virtual environment. Install PyTorch appropriate for your device,
-then install MLPUI and the two fork checkouts:
+Use a separate environment and install PyTorch appropriate for your device,
+then install MLPUI. Separate NewtonNet/TorchMD-Net installations and source
+checkout overlays are no longer needed:
 
-```powershell
+```bash
 python -m pip install -e ".[test]"
-python -m pip install --no-build-isolation -e ../torchmd-net
-python -m pip install -e ../NewtonNet
+python -m pytest -q
 ```
 
-TorchMD-Net needs its compiled neighbor extension (and a C++/CUDA toolchain for
-source builds). NewtonNet's fork requires `les`. Model dependencies load lazily:
-using TorchMD-Net does not require importing NewtonNet or the UMA stack.
+NewtonNet energy/force heads do not require `les`. Energy with a charge head,
+BEC and legacy full pickles containing LES objects need that optional library
+(`python -m pip install -e ".[les]"`). Existing state-dict checkpoints retain their parameter
+names and use the bundled implementations. Old fully serialized model files
+still require explicit `trusted_checkpoint=True`; their module names are mapped
+to bundled classes without importing the external model packages.
 
-For a **Windows CPU test environment without a compiler**, the following setup
-was tested with Python 3.11. It installs the compatible CPU wheel and overlays the
-Python sources from your local forks while retaining the wheel's native extension.
-Only use this source overlay in a dedicated test environment; repeat the tests
-after changing either fork or the extension version.
+TorchMD-Net includes a PyTorch neighbor-search fallback for CPU and CUDA with
+no compiler required. This uses quadratic memory/time; for large GPU workloads
+compile the included acceleration sources with a C++ compiler and a CUDA toolkit
+compatible with your PyTorch installation:
 
-```powershell
-py -3.11 -m venv .venv
-.\.venv\Scripts\python -m pip install torchmd-net-cpu==2.4.14 ase pytest pyyaml psutil omegaconf "les @ git+https://github.com/ChengUCB/les@35b971a650cf30adb84fef7138761e81aa47b3a2"
-.\.venv\Scripts\python scripts/install_local_backends.py --torchmd-root ../torchmd-net --newtonnet-root ../NewtonNet
-.\.venv\Scripts\python -m pip install -e ".[test]"
-.\.venv\Scripts\python -m pytest -q
+```bash
+python scripts/build_model_extensions.py --cuda
 ```
+
+For CPU-only native kernels omit `--cuda`. Builds are local to this checkout;
+rebuild after PyTorch/CUDA upgrades. The loader prefers the native extension
+when available. `MLPUI_NEIGHBORS=python` forces the fallback;
+`MLPUI_NEIGHBORS=native` requires the extension and fails if it cannot load.
+The fallback does not support CUDA graph capture or full-graph compilation.
+
+```python
+from mlpui.models.newtonnet.models.newtonnet import NewtonNet
+from mlpui.models.torchmdnet.models.model import create_model
+from mlpui.models.torchmdnet.extensions.ops import BACKEND
+print(BACKEND)  # "python" or "native"
+```
+
+The bundled NewtonNet source retains its Regents educational/research/nonprofit
+license; TorchMD-Net retains its MIT license. These licenses are shipped with
+the packages and are not replaced by MLPUI's own license.
 
 ## TorchMD-Net
 

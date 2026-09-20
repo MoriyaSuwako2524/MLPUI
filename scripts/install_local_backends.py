@@ -1,4 +1,6 @@
-"""Overlay local fork Python sources in an isolated test venv.
+"""Legacy helper: prepare external reference packages for comparison tests only.
+
+Normal MLPUI use imports bundled models and does not need this overlay.
 
 On Windows this retains the compiled neighbor extension from torchmd-net-cpu.
 For production/GPU environments, build and install the fork normally instead.

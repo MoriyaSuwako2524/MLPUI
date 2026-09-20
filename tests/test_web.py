@@ -1,3 +1,4 @@
+import importlib
 import copy
 import json
 import threading
@@ -71,7 +72,7 @@ def test_status_write_retries_windows_sharing_violation(tmp_path, monkeypatch):
 
 @pytest.mark.integration
 def test_real_job_stop_failure_and_reload(tmp_path):
-    pytest.importorskip("newtonnet.models.newtonnet")
+    importlib.import_module("mlpui.models.newtonnet.models.newtonnet")
     manager = JobManager(tmp_path / "runs")
     try:
         config = settings(tmp_path)
@@ -133,7 +134,7 @@ def test_http_and_origin_guard(tmp_path, host):
 @pytest.mark.integration
 @pytest.mark.parametrize("family", ["newtonnet", "torchmdnet"])
 def test_web_presets_train(tmp_path, family):
-    pytest.importorskip("newtonnet.models.newtonnet" if family == "newtonnet" else "torchmdnet.models.model")
+    importlib.import_module("mlpui.models.newtonnet.models.newtonnet" if family == "newtonnet" else "mlpui.models.torchmdnet.models.model")
     config = presets()[family]
     if family == "newtonnet":
         config.update(n_features=8, n_basis=4, n_interactions=1)
@@ -145,7 +146,7 @@ def test_web_presets_train(tmp_path, family):
 
 @pytest.mark.integration
 def test_http_training_and_download(tmp_path):
-    pytest.importorskip("newtonnet.models.newtonnet")
+    importlib.import_module("mlpui.models.newtonnet.models.newtonnet")
     server = make_server(tmp_path / "runs", 0)
     threading.Thread(target=server.serve_forever, daemon=True).start()
     base = f"http://127.0.0.1:{server.server_port}"
@@ -234,7 +235,7 @@ def test_crashed_session_is_interrupted(tmp_path):
 
 @pytest.mark.integration
 def test_progress_and_cooperative_stop(tmp_path):
-    pytest.importorskip("newtonnet.models.newtonnet")
+    importlib.import_module("mlpui.models.newtonnet.models.newtonnet")
     config = settings(tmp_path)
     trainer = Trainer("newtonnet", config["model_config"], TrainingConfig(epochs=2))
     events = []

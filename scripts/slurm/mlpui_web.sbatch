@@ -53,7 +53,7 @@ echo "WebUI bind address: ${BIND_HOST}:${Port} (on the compute node)"
 "$PYTHON" -u - <<'PY'
 import torch
 from mlpui.web.server import make_server
-from newtonnet.models.newtonnet import NewtonNet
+from mlpui.models.newtonnet.models.newtonnet import NewtonNet
 print("PyTorch:", torch.__version__, "CUDA runtime:", torch.version.cuda, flush=True)
 if not torch.cuda.is_available():
     raise SystemExit("No CUDA device is available. Check the allocation and PyTorch environment.")

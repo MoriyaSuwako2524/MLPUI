@@ -1,3 +1,4 @@
+import importlib
 import numpy as np
 import pytest
 import torch
@@ -115,7 +116,7 @@ def test_invalid_training_config(kwargs):
 @pytest.mark.parametrize("family", ["newtonnet", "graph-network", "transformer", "equivariant-transformer", "tensornet"])
 def test_real_force_training_and_checkpoint(tmp_path, family):
     is_newton = family == "newtonnet"
-    pytest.importorskip("newtonnet.models.newtonnet" if is_newton else "torchmdnet.models.model")
+    importlib.import_module("mlpui.models.newtonnet.models.newtonnet" if is_newton else "mlpui.models.torchmdnet.models.model")
     config = (dict(cutoff=3., n_features=8, n_basis=4, n_interactions=1,
                    activation="silu", output_properties=["energy", "gradient_force"])
               if is_newton else torchmd_args(family))
@@ -163,7 +164,7 @@ def test_cli(tmp_path):
     import subprocess
     import sys
     import yaml
-    pytest.importorskip("newtonnet.models.newtonnet")
+    importlib.import_module("mlpui.models.newtonnet.models.newtonnet")
     write_data(tmp_path / "data")
     spec = {"family": "newtonnet", "model_config": {
         "cutoff": 3., "n_features": 8, "n_basis": 4, "n_interactions": 1,
@@ -191,7 +192,7 @@ def test_invalid_save_and_test_intervals(kwargs):
 @pytest.mark.integration
 @pytest.mark.parametrize("family", ["newtonnet", "torchmdnet"])
 def test_periodic_saving_retention_and_test_cadence(tmp_path, family):
-    pytest.importorskip("newtonnet.models.newtonnet" if family == "newtonnet" else "torchmdnet.models.model")
+    importlib.import_module("mlpui.models.newtonnet.models.newtonnet" if family == "newtonnet" else "mlpui.models.torchmdnet.models.model")
     model_config = (dict(cutoff=3., n_features=8, n_basis=4, n_interactions=1,
                         output_properties=["energy", "gradient_force"])
                     if family == "newtonnet" else torchmd_args("tensornet"))

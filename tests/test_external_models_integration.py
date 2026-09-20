@@ -1,3 +1,4 @@
+import importlib
 """Real backend round trips; install both forks before running this module."""
 import numpy as np
 import pytest
@@ -33,7 +34,7 @@ def water(periodic=False):
 @pytest.mark.parametrize("architecture", ["graph-network", "transformer", "equivariant-transformer", "tensornet"])
 @pytest.mark.parametrize("periodic", [False, True])
 def test_torchmd_real_roundtrip(tmp_path, architecture, periodic):
-    backend = pytest.importorskip("torchmdnet.models.model")
+    backend = importlib.import_module("mlpui.models.torchmdnet.models.model")
     torch.manual_seed(12)
     args = torchmd_args(architecture)
     model = backend.create_model(dict(args))
@@ -64,7 +65,7 @@ def test_torchmd_real_roundtrip(tmp_path, architecture, periodic):
 
 
 def test_torchmd_legacy_tuple_checkpoint(tmp_path):
-    backend = pytest.importorskip("torchmdnet.models.model")
+    backend = importlib.import_module("mlpui.models.torchmdnet.models.model")
     args = torchmd_args("graph-network", precision=32)
     created = backend.create_model(dict(args))
     model = backend.TorchMD_Net(created.representation_model, created.output_modules["y"], derivative=True)
@@ -78,7 +79,7 @@ def test_torchmd_legacy_tuple_checkpoint(tmp_path):
 
 
 def test_torchmd_rejects_missing_learned_head(tmp_path):
-    backend = pytest.importorskip("torchmdnet.models.model")
+    backend = importlib.import_module("mlpui.models.torchmdnet.models.model")
     args = torchmd_args("tensornet")
     model = backend.create_model(dict(args))
     state = model.state_dict()
@@ -91,7 +92,7 @@ def test_torchmd_rejects_missing_learned_head(tmp_path):
 
 
 def test_torchmd_per_head_only_scalers(tmp_path):
-    backend = pytest.importorskip("torchmdnet.models.model")
+    backend = importlib.import_module("mlpui.models.torchmdnet.models.model")
     args = torchmd_args("tensornet")
     model = backend.create_model(dict(args))
     state = model.state_dict()
@@ -107,7 +108,7 @@ def test_torchmd_per_head_only_scalers(tmp_path):
 
 
 def test_ase_pbc_overrides_training_box(tmp_path):
-    backend = pytest.importorskip("torchmdnet.models.model")
+    backend = importlib.import_module("mlpui.models.torchmdnet.models.model")
     args = torchmd_args("tensornet")
     args["box_vecs"] = [[10., 0., 0.], [0., 10., 0.], [0., 0., 10.]]
     model = backend.create_model(dict(args))
@@ -125,7 +126,8 @@ def test_ase_pbc_overrides_training_box(tmp_path):
 
 @pytest.mark.parametrize("periodic", [False, True])
 def test_newton_real_roundtrip(tmp_path, periodic):
-    backend = pytest.importorskip("newtonnet.models.newtonnet")
+    pytest.importorskip("les")  # This case includes the charge-dependent LES energy.
+    backend = importlib.import_module("mlpui.models.newtonnet.models.newtonnet")
     torch.manual_seed(3)
     config = dict(cutoff=3., n_features=8, n_basis=4, n_interactions=1, activation="silu",
                   output_properties=["energy", "gradient_force", "charge", "dipole"] + (["stress"] if periodic else []))
@@ -153,7 +155,7 @@ def test_newton_real_roundtrip(tmp_path, periodic):
 
 
 def test_newton_trusted_serialized_model_and_yaml(tmp_path):
-    backend = pytest.importorskip("newtonnet.models.newtonnet")
+    backend = importlib.import_module("mlpui.models.newtonnet.models.newtonnet")
     import yaml
     config = dict(cutoff=3., n_features=8, n_basis=4, n_interactions=1,
                   output_properties=["energy", "gradient_force"])

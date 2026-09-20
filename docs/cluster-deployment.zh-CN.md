@@ -47,7 +47,7 @@ test -x "$PYTHON" || { echo "请修改为实际 Python 路径"; exit 1; }
 
 cd /path/to/work/mlpui-deployment/MLPUI
 "$PYTHON" --version
-"$PYTHON" -m pip install numpy ase pyyaml psutil omegaconf
+"$PYTHON" -m pip install numpy ase pyyaml psutil omegaconf torch-geometric lightning-utilities
 "$PYTHON" -m pip install --no-deps -e .
 ```
 
@@ -63,7 +63,7 @@ import inspect
 import torch
 import mlpui
 from mlpui.web.server import make_server
-from newtonnet.models.newtonnet import NewtonNet
+from mlpui.models.newtonnet.models.newtonnet import NewtonNet
 print('MLPUI:', mlpui.__file__)
 print('NewtonNet:', inspect.getfile(NewtonNet))
 print('forward:', inspect.signature(NewtonNet.forward))
@@ -71,9 +71,16 @@ print('PyTorch:', torch.__version__, 'CUDA runtime:', torch.version.cuda)
 PY
 ```
 
-本接口适配项目使用的 [NewtonNet fork](https://github.com/MoriyaSuwako2524/NewtonNet)，其调用为 `forward(self, z, pos, cell, batch)`。如果原环境是另一版 NewtonNet，建议在克隆的独立环境中安装匹配版本，避免破坏原工作流。该 fork 还依赖 `les`；具体安装参考项目 README。登录节点没有 GPU 时 `torch.cuda.is_available()` 为假可以正常发生，提交脚本会在分配到 GPU 后再次检查。
+NewtonNet 和 TorchMD-Net 已内置在 MLPUI，不再需要安装两份 fork 或覆盖外部包。上面的 NewtonNet 路径应指向 `MLPUI/mlpui/models/newtonnet/`。标准能量/力输出无需 `les`，只有 LES 输出头需要它。登录节点没有 GPU 时 CUDA 不可用是正常现象，作业脚本会在分配到 GPU 后检查。
 
-只使用 NewtonNet 时无需安装 TorchMD-Net。以后需要 TensorNet，再安装项目指定的 [TorchMD-Net fork](https://github.com/MoriyaSuwako2524/torchmd-net) 及与 GPU PyTorch 匹配的编译扩展。**不要在集群沿用 README 中的 Windows CPU wheel 覆盖方案。** CUDA 模块、PyTorch CUDA runtime 和驱动之间的兼容性以你现有可工作的环境为准。
+TensorNet 默认可以使用内置 PyTorch 邻居搜索，不需要编译，但其内存和计算量随原子数平方增长。大规模 GPU 任务建议在具备匹配 C++/CUDA 工具链的环境中编译自带扩展：
+
+```bash
+"$PYTHON" scripts/build_model_extensions.py --cuda
+"$PYTHON" -c 'from mlpui.models.torchmdnet.extensions.ops import BACKEND; print(BACKEND)'
+```
+
+成功后应显示 `native`。可在提交作业前设置 `export MLPUI_NEIGHBORS=native`，避免扩展缺失时意外使用较慢的回退路径；不编译时保持默认即可。工具链版本必须与 PyTorch 匹配，不要加载之前不存在的 `GCC/9.3.0`。无 GPU 的编译节点可能还需要设置对应目标 GPU 的 `TORCH_CUDA_ARCH_LIST`。默认 PyTorch 路径已在 CPU 验证，CUDA 编译及 GPU 运行需在集群验证。
 
 ## 4. 提交 WebUI 作业
 

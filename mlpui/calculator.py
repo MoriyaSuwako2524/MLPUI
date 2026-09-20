@@ -412,9 +412,9 @@ class CalculatorBuilder:
         family = getattr(backbone, "mlpui_family", None)
         if family is not None:
             return family
-        if type(backbone).__module__.startswith("newtonnet."):
+        if type(backbone).__module__.startswith(("newtonnet.", "mlpui.models.newtonnet.")):
             return "newtonnet"
-        if type(backbone).__module__.startswith("torchmdnet."):
+        if type(backbone).__module__.startswith(("torchmdnet.", "mlpui.models.torchmdnet.")):
             return "torchmdnet"
         cls_name = type(backbone).__name__.lower()
         if "escnmd" in cls_name or "uma" in cls_name:

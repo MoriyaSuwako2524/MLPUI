@@ -23,16 +23,21 @@ dependencies = [
     "ase>=3.22",
     "psutil>=5.9",
     "omegaconf>=2.3",
+    "lightning-utilities>=0.10",
 ]
 
 [project.optional-dependencies]
 test = ["pytest>=8"]
+les = ["les @ git+https://github.com/ChengUCB/les@35b971a650cf30adb84fef7138761e81aa47b3a2"]
 
 [tool.setuptools.packages.find]
 include = ["mlpui*", "scripts*"]
 
 [tool.setuptools.package-data]
 "mlpui.web" = ["static/*.html", "static/*.css", "static/*.js"]
+"mlpui.models.newtonnet" = ["LICENSE"]
+"mlpui.models.torchmdnet" = ["LICENSE", "extensions/*.cpp", "extensions/neighbors/*.cpp", "extensions/neighbors/*.cu", "extensions/neighbors/*.cuh"]
+"mlpui.models" = ["VENDORED_MODELS.md"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

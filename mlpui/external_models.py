@@ -1,6 +1,6 @@
-"""Checkpoint adapters for the MoriyaSuwako2524 TorchMD-Net and NewtonNet forks.
+"""Checkpoint adapters for the bundled TorchMD-Net and NewtonNet models.
 
-The optional packages are imported only when their model family is selected.
+The bundled implementations are imported only when their family is selected.
 All weights are checked strictly, including learned output heads and scalers.
 """
 from __future__ import annotations
@@ -41,9 +41,9 @@ def detect_family(state, config=None):
     """Identify a family without importing either optional backend."""
     if isinstance(state, nn.Module):
         name = type(state).__module__
-        if name.startswith("newtonnet."):
+        if name.startswith(("newtonnet.", "mlpui.models.newtonnet.")):
             return "newtonnet"
-        if name.startswith("torchmdnet."):
+        if name.startswith(("torchmdnet.", "mlpui.models.torchmdnet.")):
             return "torchmdnet"
         return None
     if not isinstance(state, Mapping):
@@ -58,11 +58,10 @@ def detect_family(state, config=None):
 
 def _torchmd_model(state, config):
     try:
-        from torchmdnet.models.model import create_model, TorchMD_Net
+        from mlpui.models.torchmdnet.models.model import create_model, TorchMD_Net
     except ImportError as exc:
         raise ImportError(
-            "TorchMD-Net backend is unavailable. Install the MoriyaSuwako2524/"
-            "torchmd-net fork and its compiled neighbor extension; see README.md."
+            "Bundled TorchMD-Net dependencies are unavailable; see README.md."
         ) from exc
     if not config or "model" not in config:
         raise ValueError("TorchMD-Net needs checkpoint hyper_parameters or model_config")
@@ -99,11 +98,10 @@ def _torchmd_model(state, config):
 
 def _newton_model(state, config):
     try:
-        from newtonnet.models.newtonnet import NewtonNet
+        from mlpui.models.newtonnet.models.newtonnet import NewtonNet
     except ImportError as exc:
         raise ImportError(
-            "NewtonNet backend is unavailable. Install the MoriyaSuwako2524/"
-            "NewtonNet fork and its dependencies (including les); see README.md."
+            "Bundled NewtonNet dependencies are unavailable; see README.md."
         ) from exc
     if isinstance(config.get("model"), Mapping):
         config = config["model"]
@@ -137,7 +135,11 @@ def load_external_checkpoint(path, *, family=None, model_config=None, device=Non
     if family == "uma":
         return None
     try:
-        checkpoint = torch.load(path, map_location="cpu", weights_only=not trusted_checkpoint)
+        options = {}
+        if trusted_checkpoint:
+            from mlpui.models import checkpoint_pickle
+            options["pickle_module"] = checkpoint_pickle
+        checkpoint = torch.load(path, map_location="cpu", weights_only=not trusted_checkpoint, **options)
     except pickle.UnpicklingError as exc:
         if family is None and "fairchem.core.units.mlip_unit.api.inference" in str(exc):
             return None

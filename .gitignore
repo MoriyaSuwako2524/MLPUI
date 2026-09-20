@@ -11,3 +11,5 @@ build/
 dist/
 runs/
 /models/
+/mlpui/models/torchmdnet/extensions/*.pyd
+/mlpui/models/torchmdnet/extensions/*.so
