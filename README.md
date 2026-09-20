@@ -185,8 +185,13 @@ ssh -N -L 8675:127.0.0.1:8675 pete
 ```
 
 Open the local URL above. If training runs on a separate compute node, the tunnel
-must target that node. The basic server binds only to loopback; it is a local,
+must target that node. The server defaults to loopback; it is a
 single-user tool and does not include public hosting, accounts, or a job queue.
+On a trusted cluster network, `--host 0.0.0.0` (or `MLPUI_HOST=0.0.0.0`
+in the Slurm script) permits forwarding through the login node directly to the
+compute node. This exposes an unauthenticated service to reachable cluster peers;
+Host/Origin checks are not authentication. Keep the browser on localhost and
+use the same port at both ends of the SSH tunnel.
 UMA is not included in this UI.
 
 Periodic files live at `checkpoints/epoch_000010.pt`, etc., and can be downloaded

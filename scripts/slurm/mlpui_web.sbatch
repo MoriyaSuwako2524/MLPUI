@@ -13,7 +13,7 @@
 # Submit from the MLPUI project root, AFTER running: mkdir -p logs
 # Optional overrides: MLPUI_ROOT, MLPUI_PYTHON, MLPUI_PORT, MLPUI_RUNS_DIR,
 #                     MLPUI_ID_SCRIPT (your existing site-specific id.py),
-#                     MLPUI_LOGIN_HOST, MLPUI_LOGIN_USER (reverse SSH tunnel).
+#                     MLPUI_LOGIN_HOST, MLPUI_LOGIN_USER (reverse SSH tunnel), MLPUI_HOST.
 set -euo pipefail
 
 # Use an already prepared GPU environment, just like the working ComfyUI job.
@@ -27,6 +27,7 @@ PYTHON="${MLPUI_PYTHON:-${HOME}/.conda/envs/newtonnet/bin/python}"
 
 MLPUI_ROOT="${MLPUI_ROOT:-${SLURM_SUBMIT_DIR:-$PWD}}"
 Port="${MLPUI_PORT:-2526}"
+BIND_HOST="${MLPUI_HOST:-127.0.0.1}"
 RUNS_DIR="${MLPUI_RUNS_DIR:-${MLPUI_ROOT}/runs/cluster-web}"
 export OMP_NUM_THREADS="${SLURM_CPUS_PER_TASK:-1}"
 export PYTHONUNBUFFERED=1
@@ -46,7 +47,7 @@ if command -v nvidia-smi >/dev/null 2>&1; then
 fi
 echo "Project: $MLPUI_ROOT"
 echo "Results: $RUNS_DIR"
-echo "WebUI: http://127.0.0.1:${Port} (on the compute node)"
+echo "WebUI bind address: ${BIND_HOST}:${Port} (on the compute node)"
 
 # Fail early if the existing environment cannot use the allocated GPU.
 "$PYTHON" -u - <<'PY'
@@ -102,6 +103,11 @@ if [[ -n "${MLPUI_LOGIN_HOST:-}" ]]; then
     fi
     echo "From your computer, connect to the SAME actual login node:"
     echo "ssh -N -o ExitOnForwardFailure=yes -o ServerAliveInterval=30 -L 127.0.0.1:${Port}:127.0.0.1:${Port} $LOGIN_TARGET"
+elif [[ "$BIND_HOST" != "127.0.0.1" && "$BIND_HOST" != "localhost" ]]; then
+    echo "Direct cluster-network mode: no reverse SSH connection is needed."
+    echo "The WebUI has no authentication; use only on a trusted cluster network."
+    echo "From your computer (replace LOGIN with your login host):"
+    echo "ssh -N -o ExitOnForwardFailure=yes -L 127.0.0.1:${Port}:$(hostname):${Port} ${USER}@LOGIN"
 else
     echo "From your computer (replace USER, LOGIN and GPU_NODE):"
     echo "ssh -N -o ExitOnForwardFailure=yes -J USER@LOGIN -L 127.0.0.1:${Port}:127.0.0.1:${Port} USER@GPU_NODE"
@@ -110,6 +116,6 @@ echo "Then open http://127.0.0.1:${Port} and select GPU / CUDA when creating a t
 echo "Stop the training in the UI and wait for model.pt before cancelling the Slurm job."
 
 # Wait for the server and close our reverse tunnel when the script exits.
-"$PYTHON" -u -m mlpui.web --port "$Port" --runs-dir "$RUNS_DIR" &
+"$PYTHON" -u -m mlpui.web --host "$BIND_HOST" --port "$Port" --runs-dir "$RUNS_DIR" &
 WEB_PID=$!
 wait "$WEB_PID"

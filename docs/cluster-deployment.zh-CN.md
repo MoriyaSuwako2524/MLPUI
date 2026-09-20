@@ -141,6 +141,32 @@ ssh -N -o ExitOnForwardFailure=yes -J USER@LOGIN -L 127.0.0.1:2526:127.0.0.1:252
 
 如果本机 2526 已被占用，请更改提交前的 `MLPUI_PORT`，并把隧道两端端口和浏览器端口一起修改。当前 WebUI 检查 Host/Origin，使用相同端口最直接。
 
+### 方式 A2：像 ComfyUI 一样，经登录节点直接访问计算节点端口
+
+如果登录节点可以连接计算节点的服务端口，不需要 SSH 登录计算节点，也不需要反向隧道。在项目目录执行：
+
+```bash
+git pull --ff-only
+export MLPUI_ROOT="$PWD"
+export MLPUI_HOST=0.0.0.0
+export MLPUI_PORT=2526
+unset MLPUI_LOGIN_HOST
+mkdir -p logs
+sbatch scripts/slurm/mlpui_web.sbatch
+```
+
+从作业日志获取实际计算节点名（例如 c1036），在本机 PowerShell 执行：
+
+```powershell
+ssh -N -o ExitOnForwardFailure=yes -L 127.0.0.1:2526:c1036:2526 moriya2524@sooner.oscer.ou.edu
+```
+
+打开 `http://127.0.0.1:2526/`。中间的 `c1036` 必须替换为本次作业节点，不能写成 `127.0.0.1`。本地和服务端端口保持一致，以通过 Host/Origin 检查。
+
+可先在登录节点检查连通性：`curl --connect-timeout 5 -H 'Host: 127.0.0.1:2526' http://c1036:2526/api/jobs`。返回 JSON 表示通路可用；超时或拒绝连接时检查作业日志、节点名和集群网络策略。
+
+此模式会向可达的集群网络开放没有账号认证的 WebUI；Host/Origin 检查不等同于访问认证，仅在可信网络使用。默认仍监听 `127.0.0.1`。新启动前先正常结束使用同一任务目录的旧 WebUI。
+
 ### 方式 B：不允许 SSH 进入计算节点，但允许计算节点 SSH 回登录节点
 
 启动脚本已支持自动建立反向隧道：设置 `MLPUI_LOGIN_HOST` 即启用，`MLPUI_LOGIN_USER` 默认是当前用户名。隧道仅监听登录节点的 `127.0.0.1`，建立失败时不启动 WebUI，脚本退出时关闭自己创建的隧道。连接中断时 SSH 会通过保活检测退出，但不会自动重新认证；需要重新建立隧道。

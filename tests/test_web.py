@@ -99,8 +99,10 @@ def test_real_job_stop_failure_and_reload(tmp_path):
         manager.close()
 
 
-def test_http_and_origin_guard(tmp_path):
-    server = make_server(tmp_path / "runs", 0)
+@pytest.mark.parametrize("host", ["127.0.0.1", "0.0.0.0"])
+def test_http_and_origin_guard(tmp_path, host):
+    server = make_server(tmp_path / "runs", 0, host=host)
+    assert server.server_address[0] == host
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
     base = f"http://127.0.0.1:{server.server_port}"

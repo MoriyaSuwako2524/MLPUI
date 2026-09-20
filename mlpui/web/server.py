@@ -115,7 +115,7 @@ class JobManager:
                 write_json(folder / "status.json", state)
 
 
-def make_server(root, port=8675):
+def make_server(root, port=8675, host="127.0.0.1"):
     manager = JobManager(root)
     # Reject a second server using the same run directory. OS releases lock on
     # crashes; any orphan is terminated by the worker's parent-liveness check.
@@ -238,7 +238,7 @@ def make_server(root, port=8675):
                 self.respond({"error": str(exc)}, 403 if isinstance(exc, PermissionError) else 400)
 
     try:
-        server = ThreadingHTTPServer(("127.0.0.1", port), Handler)
+        server = ThreadingHTTPServer((host, port), Handler)
     except Exception:
         lease.close()
         raise
@@ -250,10 +250,13 @@ def make_server(root, port=8675):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--port", type=int, default=8675)
+    parser.add_argument("--host", default="127.0.0.1",
+                        help="Bind address; 0.0.0.0 allows cluster-network access (no authentication)")
     parser.add_argument("--runs-dir", default="runs/web")
     args = parser.parse_args()
-    server = make_server(args.runs_dir, args.port)
-    print(f"MLPUI: http://127.0.0.1:{server.server_port}", flush=True)
+    server = make_server(args.runs_dir, args.port, host=args.host)
+    print(f"MLPUI listening: {args.host}:{server.server_port}", flush=True)
+    print(f"Browser via SSH tunnel: http://127.0.0.1:{server.server_port}", flush=True)
     try:
         server.serve_forever()
     except KeyboardInterrupt:
