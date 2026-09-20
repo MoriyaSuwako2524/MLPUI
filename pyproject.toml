@@ -20,4 +20,20 @@ dependencies = [
     "torch_geometric>=2.0.0",
     "numpy>=1.20.0",
     "pyyaml>=6.0",
+    "ase>=3.22",
+    "psutil>=5.9",
+    "omegaconf>=2.3",
 ]
+
+[project.optional-dependencies]
+test = ["pytest>=8"]
+
+[tool.setuptools.packages.find]
+include = ["mlpui*", "scripts*"]
+
+[tool.setuptools.package-data]
+"mlpui.web" = ["static/*.html", "static/*.css", "static/*.js"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = ["integration: runs real optional model backends"]

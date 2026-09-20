@@ -91,9 +91,6 @@ def detect_unet_config(state_dict, key_prefix, metadata=None):
             if mole_weight_key in state_dict and state_dict[mole_weight_key].ndim == 3:
                 mlp_config["num_experts"] = state_dict[mole_weight_key].shape[0]
         mlp_config["use_composition_embedding"] = "{}composition_embedding.weight".format(key_prefix) in keys
-        heads = {}
-        if "'module.output_heads.energyandforcehead.head.energy_block.2.bias" in keys:
-
         datasets = [
             k.split(".")[-2]
             for k in keys

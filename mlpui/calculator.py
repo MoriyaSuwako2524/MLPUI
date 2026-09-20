@@ -124,9 +124,7 @@ class SimpleOutputAdapter(OutputAdapter):
 
     def convert(self, output: Any, atoms: ase.Atoms) -> dict[str, np.ndarray]:
         if isinstance(output, tuple):
-            output = {"energy": output[0]}
-            if len(output) > 1 and output[1] is not None:
-                output["forces"] = output[1]
+            output = dict(zip(("energy", "forces"), output))
 
         results = {}
         n = len(atoms)
@@ -201,6 +199,7 @@ class MLPCalculator(Calculator):
         """
         if self._patcher.is_patched:
             self._patcher.unpatch_model()
+            self._ready = False
         if not self._keep_on_device:
             self._patcher.offload()
             self._ready = False
@@ -255,7 +254,6 @@ class MLPCalculator(Calculator):
             model_input = self._input_adapter.convert(atoms, self._device, self._dtype)
             with torch.no_grad() if "forces" not in self._properties else torch.enable_grad():
                 raw_output = self._forward(model_input)
-                print(raw_output)
             self.results = self._output_adapter.convert(raw_output, atoms)
         finally:
             self._maybe_offload()
@@ -355,13 +353,20 @@ class CalculatorBuilder:
     task: str | None = None
     charge: int = 0
     spin: int = 0
-    dtype: torch.dtype = torch.float32
+    dtype: torch.dtype | None = None
     device: torch.device | str | None = None
     keep_on_device: bool = True
+    energy_to_ev: float = 1.0
+    length_to_angstrom: float = 1.0
+    dipole_to_eangstrom: float = 1.0
 
     def build(self):
 
         device = self._resolve_device()
+        family = self._detect_model_family()
+        if family in ("torchmdnet", "newtonnet"):
+            from mlpui.external_calculator import build_external_calculator
+            return build_external_calculator(self, family, device)
         input_adapter = self._resolve_input_adapter()
         output_adapter = self._resolve_output_adapter()
 
@@ -380,7 +385,7 @@ class CalculatorBuilder:
                 input_adapter=input_adapter,
                 output_adapter=output_adapter,
                 properties=self.properties,
-                dtype=self.dtype,
+                dtype=self.dtype or torch.float32,
                 device=device,
                 keep_on_device=self.keep_on_device,
             )
@@ -390,7 +395,7 @@ class CalculatorBuilder:
                 input_adapter=input_adapter,
                 output_adapter=output_adapter,
                 properties=self.properties,
-                dtype=self.dtype,
+                dtype=self.dtype or torch.float32,
                 device=device,
                 keep_on_device=self.keep_on_device,
             )
@@ -404,6 +409,13 @@ class CalculatorBuilder:
     def _detect_model_family(self) -> str:
 
         backbone = self._get_backbone()
+        family = getattr(backbone, "mlpui_family", None)
+        if family is not None:
+            return family
+        if type(backbone).__module__.startswith("newtonnet."):
+            return "newtonnet"
+        if type(backbone).__module__.startswith("torchmdnet."):
+            return "torchmdnet"
         cls_name = type(backbone).__name__.lower()
         if "escnmd" in cls_name or "uma" in cls_name:
             return "uma"
@@ -449,10 +461,14 @@ class CalculatorBuilder:
 
 
     @classmethod
-    def from_checkpoint(cls, ckpt_path: str, **kwargs) -> CalculatorBuilder:
+    def from_checkpoint(cls, ckpt_path: str, *, family=None, model_config=None,
+                        trusted_checkpoint=False, **kwargs) -> CalculatorBuilder:
 
         from mlpui.mlp import load_checkpoint_guess_config
-        patcher = load_checkpoint_guess_config(ckpt_path)
+        patcher = load_checkpoint_guess_config(
+            ckpt_path, family=family, model_config=model_config,
+            trusted_checkpoint=trusted_checkpoint, device=kwargs.get("device"), dtype=kwargs.get("dtype"),
+        )
         return cls(model_patcher=patcher, **kwargs)
 
     @classmethod

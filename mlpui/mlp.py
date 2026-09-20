@@ -1,21 +1,34 @@
-from mlpui.model_loader import load_torch_file
 from mlpui.utils import calculate_parameters,_weight_dtype
-import mlpui.model_management as model_management
-from mlpui.model_detection import unet_prefix_from_state_dict,model_config_from_unet
 import logging
 import torch
 import mlpui.model_patcher
 import os
 import yaml
 
-def load_checkpoint( ckpt_path=None, state_dict=None, config=None):
+def load_checkpoint(ckpt_path=None, state_dict=None, config=None, **kwargs):
 
-    model = load_checkpoint_guess_config(ckpt_path,  output_model=True)
+    if state_dict is not None:
+        raise ValueError("Use a checkpoint file for external models, or load_state_dict_guess_config for UMA")
+    model = load_checkpoint_guess_config(ckpt_path, model_config=config, **kwargs)
 
     return model
 
 
-def load_checkpoint_guess_config(ckpt_path,  output_model=True, model_options={}, disable_dynamic=False):
+def load_checkpoint_guess_config(ckpt_path, output_model=True, model_options=None, disable_dynamic=False,
+                                 *, family=None, model_config=None, device=None, dtype=None,
+                                 trusted_checkpoint=False):
+
+    from mlpui.external_models import load_external_checkpoint
+    model_options = dict(model_options or {})
+    dtype = dtype or model_options.get("dtype", model_options.get("weight_dtype"))
+    external = load_external_checkpoint(
+        ckpt_path, family=family, model_config=model_config, device=device,
+        dtype=dtype, trusted_checkpoint=trusted_checkpoint,
+    )
+    if external is not None:
+        return external if output_model else None
+
+    from mlpui.model_loader import load_torch_file
 
     sd, metadata = load_torch_file(ckpt_path, return_metadata=True)
     model = load_state_dict_guess_config(sd,  output_model, model_options, metadata=metadata, disable_dynamic=disable_dynamic)
@@ -31,6 +44,8 @@ def model_detection_error_hint(path, state_dict):
 
 
 def load_state_dict_guess_config(sd, output_model=True, model_options={}, metadata=None, disable_dynamic=False):
+    import mlpui.model_management as model_management
+    from mlpui.model_detection import unet_prefix_from_state_dict, model_config_from_unet
     model = None
     model_patcher = None
 
@@ -70,7 +85,7 @@ def load_state_dict_guess_config(sd, output_model=True, model_options={}, metada
     if output_model:
         if inital_load_device != torch.device("cpu"):
             logging.info("loaded mlp model directly to GPU")
-            model_management.load_models_gpu([model_patcher], force_full_load=True)
+            model_patcher.to_device(inital_load_device)
 
     return model_patcher
 

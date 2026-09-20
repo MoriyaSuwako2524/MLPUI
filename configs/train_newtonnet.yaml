@@ -1,0 +1,38 @@
+# Paths are relative to this YAML file. Change the directory for local datasets.
+family: newtonnet
+model_config:
+  cutoff: 5.0
+  n_features: 64
+  n_basis: 20
+  n_interactions: 3
+  activation: silu
+  output_properties: [energy, gradient_force]
+training:
+  epochs: 10
+  batch_size: 4
+  learning_rate: 0.001
+  dtype: float64
+  device: cpu
+  loss_weights: {energy: 1.0, forces: 1.0}
+train:
+  directory: /scratch/moriya/codex/chorismate_mutase/calc1/npys
+  shards: [w00, w01]
+  files:
+    z: full_qm_type.npy
+    pos: qm_coord_{shard}.npy
+    forces: qm_grad_{shard}.npy
+    energy: energy_{shard}.npy
+  gradients: true
+  # Defaults preserve source units. Set these from the data-generation workflow.
+  energy_scale: 1.0
+  length_scale: 1.0
+validation:
+  directory: /scratch/moriya/codex/chorismate_mutase/calc1/npys
+  shards: [w02]
+  files:
+    z: full_qm_type.npy
+    pos: qm_coord_{shard}.npy
+    forces: qm_grad_{shard}.npy
+    energy: energy_{shard}.npy
+  gradients: true
+output_dir: ../runs/newtonnet
