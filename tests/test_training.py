@@ -18,6 +18,41 @@ def write_data(path):
     return path
 
 
+def test_evaluation_aggregation_and_stop(tmp_path, monkeypatch):
+    trainer = object.__new__(Trainer)
+    trainer.config = TrainingConfig()
+    trainer.model = torch.nn.Linear(1, 1)
+    errors = iter([{"energy": torch.tensor([2.]), "forces": torch.tensor([1., -1., 1.])},
+                   {"energy": torch.tensor([-4.]), "forces": torch.tensor([3.] * 6)}])
+    monkeypatch.setattr(trainer, "_errors", lambda sample: next(errors))
+    result = trainer.evaluate(write_data(tmp_path))
+    assert result["metrics"]["energy"] == {"mae": 3., "mse": 10., "rmse": 10.**.5, "count": 2}
+    assert result["metrics"]["forces"]["mae"] == pytest.approx(21 / 9)
+    assert result["metrics"]["forces"]["mse"] == pytest.approx(57 / 9)
+    from mlpui.training import TrainingStopped
+    with pytest.raises(TrainingStopped):
+        trainer.evaluate(tmp_path, should_stop=lambda: True)
+
+
+@pytest.mark.parametrize("family", ["newtonnet", "torchmdnet"])
+def test_evaluation_preserves_model(tmp_path, family):
+    model_config = (dict(cutoff=3., n_features=8, n_basis=4, n_interactions=1,
+                         output_properties=["energy", "gradient_force"])
+                    if family == "newtonnet" else torchmd_args("tensornet"))
+    trainer = Trainer(family, model_config, TrainingConfig(dtype=torch.float64))
+    original = {key: value.clone() for key, value in trainer.model.state_dict().items()}
+    events = []
+    result = trainer.evaluate(write_data(tmp_path), on_progress=events.append)
+    assert result["samples"] == 2
+    assert result["metrics"]["forces"]["count"] == 18
+    assert result["metrics"]["energy"]["rmse"] >= 0
+    assert events[-1]["completed"] == 2
+    assert trainer.history == []
+    assert not trainer.optimizer.state
+    for key, value in trainer.model.state_dict().items():
+        torch.testing.assert_close(value, original[key], rtol=0, atol=0)
+
+
 def test_dense_ragged_and_validation(tmp_path):
     data = NpyDataset(write_data(tmp_path))
     assert len(data) == 2

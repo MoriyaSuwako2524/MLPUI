@@ -64,11 +64,12 @@ class JobManager:
         summary = inspect_data(settings)
         with self.lock:
             if any(job["status"] in ACTIVE for job in self.list()):
-                raise ValueError("已有训练任务在运行，请等待完成或停止后再启动。")
+                raise ValueError("已有任务在运行，请等待完成或停止后再启动。")
             job_id = uuid4().hex
             folder = self.root / job_id
             folder.mkdir()
             state = {"id": job_id, "name": settings["name"], "family": settings["family"],
+                     "task_type": settings["task_type"],
                      "status": "starting", "created": time.time(), "epoch": 0,
                      "epochs": settings["training"].get("epochs", 10), "history": [],
                      "summary": summary, "directory": str(folder)}
@@ -169,7 +170,7 @@ def make_server(root, port=8675, host="127.0.0.1"):
                     import torch
                     return self.respond({"models": presets(), "cuda": torch.cuda.is_available(),
                                          "root": str(manager.root)})
-                match = re.fullmatch(r"/api/jobs/([a-f0-9]{32})(?:/(log|config|model|checkpoints/epoch_[0-9]{6,}\.pt))?", path)
+                match = re.fullmatch(r"/api/jobs/([a-f0-9]{32})(?:/(log|config|evaluation|model|checkpoints/epoch_[0-9]{6,}\.pt))?", path)
                 if match:
                     job_id, action = match.groups()
                     folder = manager.folder(job_id)
@@ -183,6 +184,8 @@ def make_server(root, port=8675, host="127.0.0.1"):
                         return self.respond({"text": text})
                     if action == "config":
                         return self.respond(read_json(folder / "config.json"))
+                    if action == "evaluation":
+                        return self.respond(read_json(folder / "evaluation.json"))
                     if action == "model" or (action and action.startswith("checkpoints/")):
                         if action == "model":
                             if manager.get(job_id)["status"] not in {"completed", "stopped"}:

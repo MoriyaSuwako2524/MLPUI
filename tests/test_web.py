@@ -83,7 +83,7 @@ def test_real_job_stop_failure_and_reload(tmp_path):
         assert JobManager(tmp_path / "runs").list()[0]["status"] == "completed"
         config["training"]["epochs"] = 10000
         job = manager.start(config)
-        with pytest.raises(ValueError, match="已有训练任务"):
+        with pytest.raises(ValueError, match="已有任务"):
             manager.start(config)
         wait_job(manager, job["id"], terminal=False)
         manager.stop(job["id"])
@@ -171,6 +171,39 @@ def test_http_training_and_download(tmp_path):
             assert response.read()[:2] == b"PK"
         with urlopen(base + f'/api/jobs/{job["id"]}/log') as response:
             assert "epoch" in json.load(response)["text"]
+    finally:
+        server.shutdown()
+        server.manager.close()
+        server.server_close()
+        server.lease.close()
+
+
+def test_evaluation_task_and_result_endpoint(tmp_path):
+    config = settings(tmp_path)
+    config["task_type"] = "evaluation"
+    config["evaluation"] = config.pop("train")
+    with pytest.raises(ValueError, match="checkpoint"):
+        normalize(config)
+    trainer = Trainer(config["family"], config["model_config"])
+    checkpoint = trainer.save(tmp_path / "source.pt")
+    before = checkpoint.read_bytes()
+    config["checkpoint"] = str(checkpoint)
+    assert inspect_data(normalize(config))["evaluation"]["samples"] == 2
+    server = make_server(tmp_path / "runs", 0)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    try:
+        base = f"http://127.0.0.1:{server.server_port}"
+        with urlopen(Request(base + "/api/jobs", json.dumps(config).encode(),
+                             {"Content-Type": "application/json"})) as response:
+            job = json.load(response)
+        state = wait_job(server.manager, job["id"])
+        assert state["status"] == "completed", state
+        assert state["task_type"] == "evaluation"
+        assert state["evaluation"]["metrics"]["forces"]["count"] == 18
+        with urlopen(base + f'/api/jobs/{job["id"]}/evaluation') as response:
+            assert json.load(response) == state["evaluation"]
+        assert not (server.manager.folder(job["id"]) / "model.pt").exists()
+        assert checkpoint.read_bytes() == before
     finally:
         server.shutdown()
         server.manager.close()

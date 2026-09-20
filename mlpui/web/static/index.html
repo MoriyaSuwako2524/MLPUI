@@ -5,15 +5,15 @@
 <aside>
   <a class="brand" href="#jobs"><span class="mark">M</span><span>MLPUI<small>TRAINING STUDIO</small></span></a>
   <div class="nav-label">工作空间</div>
-  <a class="nav active" id="nav-jobs" href="#jobs"><span>▦</span> 训练任务</a>
-  <a class="nav" id="nav-new" href="#new"><span>＋</span> 新建训练</a>
+  <a class="nav active" id="nav-jobs" href="#jobs"><span>▦</span> 任务列表</a>
+  <a class="nav" id="nav-new" href="#new"><span>＋</span> 新建任务</a>
   <div class="side-bottom"><span class="dot"></span> 本地工作空间<small>Machine learning potentials<br>NumPy → Train → Model</small></div>
 </aside>
 <main>
   <header><span>工作空间 <span class="muted">/</span> <span id="breadcrumb">训练任务</span></span><span id="connection" class="connection">正在连接…</span></header>
   <div id="notice" role="alert" hidden></div>
   <section id="jobs-view">
-    <div class="page-title"><div><div class="eyebrow">YOUR EXPERIMENTS</div><h1>训练任务</h1><p>从分子数据到你的下一个势能模型。</p></div><a class="button primary" href="#new">＋ 新建训练</a></div>
+    <div class="page-title"><div><div class="eyebrow">YOUR EXPERIMENTS</div><h1>训练与评估</h1><p>从分子数据到你的下一个势能模型。</p></div><a class="button primary" href="#new">＋ 新建任务</a></div>
     <div class="stats"><div><span>全部任务</span><strong id="count-all">0</strong></div><div><span><i class="dot purple"></i> 运行中</span><strong id="count-active">0</strong></div><div><span><i class="dot"></i> 已完成</span><strong id="count-done">0</strong></div></div>
     <div class="panel"><div class="panel-heading"><h2>最近任务</h2><span class="muted">自动刷新 · 每次运行一个任务</span></div><div id="job-list"></div></div>
     <p class="footnote" id="runs-root"></p>
@@ -23,19 +23,20 @@
     <form id="training-form">
       <div class="form-layout"><div>
       <div class="panel form-panel"><h2><b class="step">01</b> 模型与任务</h2><div class="grid two">
+        <label class="wide">任务类型<select id="task-type"><option value="training">训练</option><option value="evaluation">评估已有模型</option></select></label>
         <label>任务名称<input id="name" required maxlength="100" placeholder="例如 chorismate-newtonnet"></label>
         <label>模型<select id="family"><option value="newtonnet">NewtonNet</option><option value="torchmdnet">TorchMD-Net / TensorNet</option></select></label>
-        <label class="wide">初始模型路径 <span class="optional">可选 · 留空从头训练</span><input id="checkpoint" placeholder="/path/to/model.pt"></label>
+        <label class="wide">模型路径 <span class="optional" id="checkpoint-hint">训练可选 · 评估必填</span><input id="checkpoint" placeholder="/path/to/model.pt"></label>
       </div><details><summary>模型结构配置</summary><p class="hint">从头训练可用默认值；微调时需与原模型结构一致。</p><textarea id="model-config" rows="12" spellcheck="false" aria-label="模型结构 JSON"></textarea></details></div>
       <div class="panel form-panel"><h2><b class="step">02</b> NumPy 数据</h2><div class="grid two">
         <label class="wide">数据目录<input id="directory" required placeholder="/scratch/moriya/codex/chorismate_mutase/calc1/npys"><small>填写 WebUI 所在机器的路径。</small></label>
         <label class="wide">文件命名<select id="layout"><option value="pete">QM 窗口 · qm_coord_w00.npy</option><option value="standard">标准文件 · z.npy / pos.npy</option><option value="custom">自定义映射</option></select></label>
-        <label>训练分组<input id="shards" value="w00, w01" placeholder="w00, w01"><small>逗号分隔；没有分组时留空。</small></label>
+        <label>数据分组<input id="shards" value="w00, w01" placeholder="w00, w01"><small>逗号分隔；没有分组时留空。</small></label>
         <label>验证分组 <span class="optional">可选</span><input id="validation-shards" placeholder="例如 w02"></label>
         <label class="wide">验证数据目录 <span class="optional">可选</span><input id="validation-directory" placeholder="分组验证可留空，使用同一数据目录"></label>
         <label>测试分组 <span class="optional">可选</span><input id="test-shards" placeholder="例如 w03, w04"></label>
         <label>测试数据目录 <span class="optional">可选</span><input id="test-directory" placeholder="分组测试可留空，使用同一数据目录"></label>
-        <p class="hint wide">测试集采用相同文件映射和单位，须与训练、验证数据分开；仅评估，不更新权重。</p>
+        <p id="split-hint" class="hint wide">测试集采用相同文件映射和单位，须与训练、验证数据分开；仅评估，不更新权重。</p>
       </div><details id="file-details"><summary>文件映射与单位</summary><p class="hint">{shard} 会替换成分组名。公共原子类型文件无需占位符。</p><div class="grid two">
         <label>原子类型<input id="file-z" value="full_qm_type.npy" required></label><label>坐标<input id="file-pos" value="qm_coord_{shard}.npy" required></label>
         <label>能量<input id="file-energy" value="energy_{shard}.npy"></label><label>力 / 梯度<input id="file-forces" value="qm_grad_{shard}.npy"></label>
@@ -45,7 +46,9 @@
         <label>长度换算系数<input id="length-scale" type="number" value="1" min="0.000000000001" step="any" required></label>
       </div><label class="check"><input type="checkbox" id="gradients" checked> 标签是能量梯度，读取时取负号转为力</label><p class="hint">系数 1 保留原始单位。请按数据生成流程确认单位。</p></details>
       <div class="preview-row"><button type="button" id="preview">检查数据</button><span id="preview-result" role="status">检查文件、数组形状与标签。</span></div></div>
-      <div class="panel form-panel"><h2><b class="step">03</b> 训练参数</h2><div class="grid three">
+      <div class="panel form-panel"><h2><b class="step">03</b> 运行参数</h2><div class="grid three">
+        <label id="eval-energy-label" hidden><input id="eval-energy" type="checkbox" checked>评估能量</label>
+        <label id="eval-forces-label" hidden><input id="eval-forces" type="checkbox" checked>评估力</label>
         <label>Epochs<input id="epochs" type="number" value="10" min="1" step="1" required></label>
         <label>Batch size<input id="batch-size" type="number" value="4" min="1" step="1" required></label>
         <label>学习率<input id="learning-rate" type="number" value="0.001" min="0.000000000001" step="any" required></label>
@@ -57,13 +60,14 @@
         <label>保存间隔 N（epoch）<input id="save-interval" type="number" value="10" min="0" step="1" required><small>0 表示关闭定期保存。</small></label>
         <label>最多保留 checkpoint 数量<input id="max-checkpoints" type="number" value="3" min="1" step="1" required><small>保留最新的文件；不含最终 model.pt。</small></label>
         <label>测试间隔 M（epoch）<input id="test-interval" type="number" value="1" min="1" step="1" required><small>填写测试集后，在 M 的倍数 epoch 评估。</small></label>
-      </div><p class="hint">权重设为 0 可关闭该项。每个 batch 累积多个结构的梯度。</p></div>
-      </div><div class="form-side"><div class="panel summary"><div class="eyebrow">READY WHEN YOU ARE</div><h2>开始一次实验</h2><p>数据、参数和训练记录会保存在独立任务目录中。</p><ul><li>能量与力的联合训练</li><li>实时进度、损失与日志</li><li>可停止并保存当前权重</li></ul><button class="primary" id="start" type="submit">开始训练 <span>→</span></button><small>训练在后台运行，关闭浏览器不影响任务。</small></div></div></div>
+      </div><p id="training-hint" class="hint">权重设为 0 可关闭该项。每个 batch 累积多个结构的梯度。</p></div>
+      </div><div class="form-side"><div class="panel summary"><div class="eyebrow">READY WHEN YOU ARE</div><h2>开始一次实验</h2><p>数据配置、参数和运行记录会保存在独立任务目录中。</p><ul><li>训练模型或评估已有模型</li><li>实时进度、指标与日志</li><li>任务结果独立保存</li></ul><button class="primary" id="start" type="submit">开始训练 <span>→</span></button><small>任务在后台运行，关闭浏览器不影响任务。</small></div></div></div>
     </form>
   </section>
   <section id="detail-view" hidden>
     <div class="page-title"><div><a href="#jobs" class="back">← 全部任务</a><h1 id="detail-name"></h1><p id="detail-meta"></p></div><button id="stop" class="danger">停止训练</button></div>
     <div class="panel progress-panel"><div><span id="detail-status" class="badge"></span><span id="progress-label"></span></div><progress id="progress" value="0" max="100"></progress><p id="detail-error" role="alert" hidden></p></div>
+    <div id="evaluation-panel" class="panel" hidden><div class="panel-heading"><h2>评估结果</h2><a id="download-evaluation" target="_blank" rel="noopener">查看结果 JSON ↗</a></div><div id="evaluation-metrics" class="output"></div><p class="footnote">能量按结构统计；力按全部原子的笛卡尔分量统计。单位沿用数据换算设置，不拟合能量偏移。</p></div>
     <div class="panel chart-panel"><div class="panel-heading"><h2>训练损失</h2><select id="metric" aria-label="损失类型"><option value="energy">Energy MSE</option><option value="forces">Forces MSE</option></select></div><div id="chart"></div><div class="legend"><span><i class="line purple"></i>训练集</span><span><i class="line green"></i>验证集</span><span><i class="line" style="background:#f4bb75"></i>测试集</span><span class="muted">按实际评估 epoch 显示 · 线性坐标</span></div><p id="test-result" class="footnote" style="padding:0 23px 18px"></p></div>
     <div class="panel"><div class="panel-heading"><h2>输出文件</h2><a id="download-model" class="button" hidden>下载模型 ↓</a></div><div class="output"><span class="muted">任务目录</span><code id="output-path"></code><a id="download-config" target="_blank" rel="noopener">查看配置 ↗</a></div></div>
     <div class="panel"><div class="panel-heading"><h2>定期保存的 Checkpoints</h2><span class="muted">最新在前</span></div><div id="checkpoint-list" class="output"></div></div>

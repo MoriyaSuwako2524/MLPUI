@@ -14,9 +14,13 @@ function text(id) { return $(id).value.trim(); }
 function number(id) { const v=Number(text(id)); if(!text(id)||!Number.isFinite(v)) throw new Error('请填写有效的数值'); return v; }
 function groups(id) { return text(id).split(',').map(v=>v.trim()).filter(Boolean); }
 function payload() {
+  const evaluating=text('task-type')==='evaluation';
   const weights={};
-  for(const key of ['energy','forces']) if(number('weight-'+key)>0) weights[key]=number('weight-'+key);
-  if(!Object.keys(weights).length) throw new Error('至少启用一项训练损失');
+  for(const key of ['energy','forces']) {
+    if(evaluating) {if($('eval-'+key).checked) weights[key]=1;}
+    else if(number('weight-'+key)>0) weights[key]=number('weight-'+key);
+  }
+  if(!Object.keys(weights).length) throw new Error('至少选择能量或力中的一项');
   const files={};
   for(const key of ['z','pos','energy','forces','cell','pbc','offsets']) {
     if(['energy','forces'].includes(key) && !(key in weights)) continue;
@@ -27,6 +31,12 @@ function payload() {
   if(groups('shards').length) train.shards=groups('shards');
   let model;
   try { model=JSON.parse($('model-config').value); } catch { throw new Error('模型结构配置不是有效的 JSON'); }
+  if(evaluating) {
+    if(!text('checkpoint')) throw new Error('评估需要填写已有模型路径');
+    return {task_type:'evaluation',name:text('name'),family:text('family'),model_config:model,
+      checkpoint:text('checkpoint'),evaluation:train,
+      training:{dtype:text('dtype'),device:text('device'),loss_weights:weights}};
+  }
   const result={name:text('name'),family:text('family'),model_config:model,train,
     training:{epochs:number('epochs'),batch_size:number('batch-size'),learning_rate:number('learning-rate'),dtype:text('dtype'),device:text('device'),seed:number('seed'),loss_weights:weights,save_interval:number('save-interval'),max_checkpoints:number('max-checkpoints'),test_interval:number('test-interval')}};
   if(text('checkpoint')) result.checkpoint=text('checkpoint');
@@ -47,7 +57,7 @@ function route() {
   const view=hash==='#new'?'new':hash.startsWith('#job/')?'detail':'jobs';
   for(const name of ['jobs','new','detail']) $(name+'-view').hidden=name!==view;
   $('nav-jobs').classList.toggle('active',view!=='new'); $('nav-new').classList.toggle('active',view==='new');
-  $('breadcrumb').textContent=view==='new'?'新建训练':view==='detail'?'任务详情':'训练任务';
+  $('breadcrumb').textContent=view==='new'?'新建任务':view==='detail'?'任务详情':'任务列表';
   notify(); current=null;
   if(view==='detail') {
     $('detail-name').textContent='加载中…'; $('detail-meta').textContent=''; $('log').textContent='加载中…';
@@ -60,29 +70,41 @@ function renderJobs() {
   $('count-active').textContent=jobs.filter(j=>active.has(j.status)).length;
   $('count-done').textContent=jobs.filter(j=>j.status==='completed').length;
   if(!jobs.length) {
-    $('job-list').innerHTML='<div class="empty"><div class="empty-icon">▦</div><h2>开始你的第一个训练任务</h2><p>连接 .npy 数据，配置模型。每次实验都有清晰的记录。</p><a class="button primary" href="#new">＋ 创建训练任务</a></div>';
+    $('job-list').innerHTML='<div class="empty"><div class="empty-icon">▦</div><h2>开始你的第一个任务</h2><p>连接 .npy 数据，配置模型。每次实验都有清晰的记录。</p><a class="button primary" href="#new">＋ 创建任务</a></div>';
     return;
   }
-  $('job-list').innerHTML='<div class="table-wrap"><table><thead><tr><th>任务</th><th>模型</th><th>状态</th><th>Epoch</th><th>创建时间</th></tr></thead><tbody>'+jobs.map(j=>`<tr><td><a href="#job/${j.id}">${escapeHTML(j.name)}</a><small>${j.id.slice(0,8)}</small></td><td>${j.family==='newtonnet'?'NewtonNet':'TorchMD-Net'}</td><td><span class="badge ${escapeHTML(j.status)}">${j.stop_requested&&active.has(j.status)?'正在停止':statuses[j.status]||escapeHTML(j.status)}</span></td><td>${j.history.length} / ${j.epochs}</td><td>${escapeHTML(new Date(j.created*1000).toLocaleString())}</td></tr>`).join('')+'</tbody></table></div>';
+  $('job-list').innerHTML='<div class="table-wrap"><table><thead><tr><th>任务</th><th>模型</th><th>状态</th><th>进度</th><th>创建时间</th></tr></thead><tbody>'+jobs.map(j=>`<tr><td><a href="#job/${j.id}">${escapeHTML(j.name)}</a><small>${j.task_type==='evaluation'?'评估':'训练'} · ${j.id.slice(0,8)}</small></td><td>${j.family==='newtonnet'?'NewtonNet':'TorchMD-Net'}</td><td><span class="badge ${escapeHTML(j.status)}">${j.stop_requested&&active.has(j.status)?'正在停止':(j.task_type==='evaluation'&&j.status==='running'?'评估中':statuses[j.status])||escapeHTML(j.status)}</span></td><td>${j.task_type==='evaluation'?`${j.completed||0} / ${j.summary.evaluation.samples} 结构`:`${j.history.length} / ${j.epochs} epochs`}</td><td>${escapeHTML(new Date(j.created*1000).toLocaleString())}</td></tr>`).join('')+'</tbody></table></div>';
 }
 function renderDetail(job) {
   current=job;
+  const evaluating=job.task_type==='evaluation';
   $('detail-name').textContent=job.name;
-  $('detail-meta').textContent=`${job.family==='newtonnet'?'NewtonNet':'TorchMD-Net'} · ${job.summary.train.samples} 个训练结构 · ${job.id.slice(0,8)}`;
+  $('detail-meta').textContent=`${job.family==='newtonnet'?'NewtonNet':'TorchMD-Net'} · ${(job.summary.evaluation||job.summary.train).samples} 个${evaluating?'评估':'训练'}结构 · ${job.id.slice(0,8)}`;
   $('detail-status').className='badge '+job.status;
   $('detail-status').textContent=job.stop_requested&&active.has(job.status)?'正在停止':statuses[job.status];
   const partial=job.phase==='training'?(job.completed||0)/(job.total||1):['validation','test'].includes(job.phase)?1:0;
   const epoch=job.history.length;
   $('progress').value=Math.min(100,100*(epoch+partial)/job.epochs);
   $('progress-label').textContent=`${epoch} / ${job.epochs} epochs`+(job.phase==='training'?` · ${job.completed} / ${job.total} 结构`:job.phase==='loading'?' · 正在加载模型与数据':job.phase==='validation'?' · 正在验证':job.phase==='test'?' · 正在评估测试集':'');
+  if(evaluating) {
+    $('progress').value=100*(job.completed||0)/(job.summary.evaluation.samples||1);
+    $('progress-label').textContent=`${job.completed||0} / ${job.summary.evaluation.samples} 结构`+(job.phase==='loading'?' · 正在加载模型与数据':'');
+    if(job.status==='running') $('detail-status').textContent='评估中';
+  }
   $('detail-error').hidden=!job.error; $('detail-error').textContent=job.error||'';
   $('stop').hidden=!active.has(job.status); $('stop').disabled=job.stop_requested;
-  $('stop').textContent=job.stop_requested?'正在停止…':'停止训练';
+  $('stop').textContent=job.stop_requested?'正在停止…':'停止任务';
   $('output-path').textContent=job.directory;
   $('download-model').hidden=!job.checkpoint || !['completed','stopped'].includes(job.status);
   $('download-model').href=`/api/jobs/${job.id}/model`;
   $('download-config').href=`/api/jobs/${job.id}/config`;
   $('checkpoint-list').innerHTML=(job.checkpoints||[]).map(name=>`<a href="/api/jobs/${job.id}/checkpoints/${encodeURIComponent(name)}">${escapeHTML(name)} ↓</a>`).join('')||'<span class="muted">尚无定期保存的 checkpoint</span>';
+  $('chart').closest('.panel').hidden=evaluating;
+  $('checkpoint-list').closest('.panel').hidden=evaluating;
+  $('evaluation-panel').hidden=!evaluating;
+  $('download-evaluation').hidden=!job.evaluation;
+  $('download-evaluation').href=`/api/jobs/${job.id}/evaluation`;
+  $('evaluation-metrics').innerHTML=job.evaluation?'<table><thead><tr><th>指标</th><th>MAE</th><th>RMSE</th><th>MSE</th></tr></thead><tbody>'+Object.entries(job.evaluation.metrics).map(([key,m])=>`<tr><td>${escapeHTML(key)}</td><td>${m.mae.toExponential(5)}</td><td>${m.rmse.toExponential(5)}</td><td>${m.mse.toExponential(5)}</td></tr>`).join('')+'</tbody></table>':'尚无完整评估结果';
   drawChart();
 }
 function drawChart() {
@@ -122,6 +144,21 @@ async function refresh() {
   finally { pollBusy=false; }
 }
 $('family').addEventListener('change',()=>{$('model-config').value=JSON.stringify(models[text('family')],null,2);});
+function updateTaskType() {
+  const evaluating=text('task-type')==='evaluation';
+  $('checkpoint').required=evaluating;
+  $('split-hint').hidden=evaluating;
+  $('training-hint').hidden=evaluating;
+  $('start').textContent=evaluating?'开始评估 →':'开始训练 →';
+  for(const id of ['epochs','batch-size','learning-rate','seed','weight-energy','weight-forces','save-interval','max-checkpoints','test-interval','validation-shards','validation-directory','test-shards','test-directory']) {
+    $(id).closest('label').hidden=evaluating; $(id).disabled=evaluating;
+  }
+  for(const id of ['eval-energy','eval-forces']) $(id).closest('label').hidden=!evaluating;
+  $('new-view').querySelector('h1').textContent=evaluating?'创建评估任务':'创建训练任务';
+  $('new-view').querySelector('.page-title p').textContent=evaluating?'选择已有模型和带标签的 npy 数据，计算误差。模型结构配置须与原模型一致。':'选择模型，连接 NumPy 数据，然后开始训练。';
+  $('preview-result').textContent='检查文件、数组形状与标签。';
+}
+$('task-type').addEventListener('change',updateTaskType);
 $('layout').addEventListener('change',()=>{
   const standard=text('layout')==='standard';
   if(text('layout')==='custom'){$('file-details').open=true;return;}
@@ -131,7 +168,7 @@ $('layout').addEventListener('change',()=>{
 });
 $('preview').addEventListener('click',async()=>{
   notify(); $('preview').disabled=true; $('preview-result').textContent='正在检查…';
-  try { const data=await api('/api/preview',payload()); $('preview-result').textContent=`✓ ${data.train.samples} 个训练结构 / ${data.train.groups} 组`+(data.validation?` · ${data.validation.samples} 个验证结构`:'')+(data.test?` · ${data.test.samples} 个测试结构`:''); }
+  try { const data=await api('/api/preview',payload()); const main=data.evaluation||data.train; $('preview-result').textContent=`✓ ${main.samples} 个${data.evaluation?'评估':'训练'}结构 / ${main.groups} 组`+(data.validation?` · ${data.validation.samples} 个验证结构`:'')+(data.test?` · ${data.test.samples} 个测试结构`:''); }
   catch(error){notify(error.message);$('preview-result').textContent='检查未通过，请核对数据配置。';}
   finally{$('preview').disabled=false;}
 });

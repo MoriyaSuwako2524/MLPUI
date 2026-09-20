@@ -99,6 +99,20 @@ def run(folder):
         options["dtype"] = getattr(torch, options.get("dtype", "float32"))
         trainer = Trainer(settings["family"], settings["model_config"], TrainingConfig(**options),
                           checkpoint=settings.get("checkpoint"))
+        if settings.get("task_type") == "evaluation":
+            data = dataset(settings["evaluation"])
+            print(f"Evaluating {len(data)} structures on {trainer.config.device}", flush=True)
+            try:
+                result = trainer.evaluate(data, on_progress=progress,
+                                          should_stop=lambda: (folder / "stop").exists())
+            except TrainingStopped:
+                publish(status="stopped", phase="stopped")
+                return
+            write_json(folder / "evaluation.json", result)
+            print(json.dumps(result), flush=True)
+            publish(status="completed", phase="completed", completed=len(data), total=len(data),
+                    evaluation=result)
+            return
         train = dataset(settings["train"])
         valid = dataset(settings["validation"]) if settings.get("validation") else None
         test = dataset(settings["test"]) if settings.get("test") else None

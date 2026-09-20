@@ -194,6 +194,21 @@ Host/Origin checks are not authentication. Keep the browser on localhost and
 use the same port at both ends of the SSH tunnel.
 UMA is not included in this UI.
 
+For a standalone evaluation, choose **评估已有模型** under **新建任务**.
+Supply an existing checkpoint, matching model structure configuration, and an
+`.npy` dataset (standard, custom mapping, or prefixed shards). Select energy,
+forces, or both, plus device and precision. Evaluation performs one pass without
+updating model weights or writing a new model. The task can be stopped and has
+its own progress, log, and result page. Old tasks default to the training type.
+
+Completed evaluations save `evaluation.json` in the task directory, also
+accessible from the result page. It contains MAE, MSE, RMSE and scalar counts:
+energy is per structure, forces are pooled over all Cartesian components across
+all atoms (including variable-size structures). Units follow the configured
+dataset conversion; no energy-offset fitting is applied. Unlike the training
+loss, force metrics are component-weighted rather than structure-weighted.
+Cancelled or failed evaluations do not publish a complete result.
+
 Periodic files live at `checkpoints/epoch_000010.pt`, etc., and can be downloaded
 from task details even while training is active or after a failed/interrupted
 run. These contain weights, model config, epoch, and history, not optimizer/RNG

@@ -32,9 +32,17 @@ def normalize(payload):
     value = copy.deepcopy(payload)
     if not isinstance(value, dict):
         raise ValueError("Expected a configuration object")
-    allowed = {"name", "family", "model_config", "training", "train", "validation", "test", "checkpoint"}
+    allowed = {"name", "family", "model_config", "training", "train", "validation", "test", "checkpoint", "task_type", "evaluation"}
     if value.keys() - allowed:
         raise ValueError("Unsupported configuration fields")
+    value.setdefault("task_type", "training")
+    if value["task_type"] not in ("training", "evaluation"):
+        raise ValueError("Task type must be training or evaluation")
+    evaluating = value["task_type"] == "evaluation"
+    if evaluating and any(key in value for key in ("train", "validation", "test")):
+        raise ValueError("Evaluation tasks use only the evaluation dataset")
+    if not evaluating and "evaluation" in value:
+        raise ValueError("Training tasks use train, validation and test datasets")
     value["name"] = str(value.get("name", "Training run")).strip()
     if not value["name"] or len(value["name"]) > 100:
         raise ValueError("Task name must contain 1–100 characters")
@@ -48,9 +56,9 @@ def normalize(payload):
         raise ValueError("Precision must be float32 or float64")
     TrainingConfig(**{**options, "dtype": getattr(torch, dtype)})
     value["training"] = options
-    for key in ("train", "validation", "test"):
+    for key in (("evaluation",) if evaluating else ("train", "validation", "test")):
         spec = value.get(key)
-        if key != "train" and not spec:
+        if key in ("validation", "test") and not spec:
             value.pop(key, None)
             continue
         if not isinstance(spec, dict) or not spec.get("directory"):
@@ -74,6 +82,8 @@ def normalize(payload):
         value["checkpoint"] = str(checkpoint)
     else:
         value.pop("checkpoint", None)
+    if evaluating and not value.get("checkpoint"):
+        raise ValueError("Evaluation requires an existing model checkpoint")
     def coordinate_files(spec):
         template = spec.get("files", {}).get("pos", "pos.npy")
         return {(Path(spec["directory"]) / template.format(shard=s)).resolve()
@@ -90,7 +100,7 @@ def normalize(payload):
 def inspect_data(settings):
     result = {}
     labels = set(settings["training"].get("loss_weights", {"energy": 1, "forces": 1}))
-    for key in ("train", "validation", "test"):
+    for key in ("train", "validation", "test", "evaluation"):
         if key not in settings:
             continue
         data = dataset(settings[key])

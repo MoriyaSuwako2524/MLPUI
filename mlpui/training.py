@@ -93,7 +93,7 @@ class Trainer:
         self.optimizer = torch.optim.Adam(self.model.parameters(), lr=self.config.learning_rate)
         self.history = []
 
-    def _loss(self, sample):
+    def _errors(self, sample):
         atoms = NpyDataset.atoms(sample)
         if "stress" in self.config.loss_weights and not np.all(atoms.pbc):
             raise ValueError("Stress training requires periodic structures")
@@ -109,7 +109,7 @@ class Trainer:
             output = dict(zip(("energy", "forces"), output))
         elif not isinstance(output, dict):
             output = vars(output)
-        losses = {}
+        errors = {}
         for prop in self.config.loss_weights:
             prediction = next((output[k] for k in AtomicOutputAdapter.ALIASES[prop]
                                if output.get(k) is not None), None)
@@ -118,11 +118,47 @@ class Trainer:
             target = torch.as_tensor(sample[prop], device=self.config.device, dtype=self.config.dtype)
             if prediction.numel() != target.numel():
                 raise ValueError(f"Model output shape {tuple(prediction.shape)} does not match {prop} target {tuple(target.shape)}")
-            losses[prop] = (prediction.reshape(target.shape) - target).square().mean()
+            errors[prop] = prediction.reshape(target.shape) - target
+            if not torch.isfinite(errors[prop]).all():
+                raise ValueError(f"Non-finite prediction or target for {prop}")
+        return errors
+
+    def _loss(self, sample):
+        losses = {prop: error.square().mean() for prop, error in self._errors(sample).items()}
         total = sum(self.config.loss_weights[k] * v for k, v in losses.items())
         if not torch.isfinite(total):
             raise ValueError("Non-finite training loss")
         return total, losses
+
+    def evaluate(self, data, *, on_progress=None, should_stop=None):
+        """Evaluate all scalar components without backward or optimizer updates.
+
+        Energy is per structure; forces are pooled over all Cartesian components.
+        Metrics use the dataset's converted units, with no energy-offset fitting.
+        """
+        data = data if isinstance(data, (NpyDataset, NpyShards)) else NpyDataset(data)
+        self.model.eval()
+        totals = {key: dict(count=0, absolute=0., squared=0.) for key in self.config.loss_weights}
+        for index, sample in enumerate(data):
+            if should_stop is not None and should_stop():
+                raise TrainingStopped("Evaluation stopped by user")
+            # Forces require differentiation with respect to positions.
+            with torch.enable_grad():
+                errors = self._errors(sample)
+            for key, error in errors.items():
+                error = error.detach().to(device="cpu", dtype=torch.float64)
+                totals[key]["count"] += error.numel()
+                totals[key]["absolute"] += error.abs().sum().item()
+                totals[key]["squared"] += error.square().sum().item()
+            if on_progress is not None:
+                on_progress({"phase": "evaluation", "completed": index + 1, "total": len(data)})
+        metrics = {}
+        for key, total in totals.items():
+            mse = total["squared"] / total["count"]
+            metrics[key] = dict(mae=total["absolute"] / total["count"],
+                                mse=mse, rmse=math.sqrt(mse), count=total["count"])
+        return {"samples": len(data), "aggregation": "all_scalar_components",
+                "units": "dataset units after configured conversion", "metrics": metrics}
 
     def fit(self, train_data, validation_data=None, *, test_data=None, output_dir=None,
             on_progress=None, should_stop=None):
