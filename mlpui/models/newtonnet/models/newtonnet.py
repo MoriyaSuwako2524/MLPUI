@@ -66,7 +66,11 @@ class NewtonNet(nn.Module):
                 self.embedding_layers.requires_dr = True
             scaler = get_scaler_by_string(key)
             self.scalers.append(scaler)
-            aggregator = get_aggregator_by_string(key, use_les="charge" in self.output_properties)
+            # A charge head after energy is an independent supervised prediction;
+            # only a charge produced before energy enters the LES energy term.
+            use_les = (key == "energy" and "charge" in self.output_properties
+                       and self.output_properties.index("charge") < self.output_properties.index("energy"))
+            aggregator = get_aggregator_by_string(key, use_les=use_les)
             self.aggregators.append(aggregator)
 
 

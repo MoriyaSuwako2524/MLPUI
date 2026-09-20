@@ -17,7 +17,7 @@ python -m pip install -e ".[test]"
 python -m pytest -q
 ```
 
-NewtonNet energy/force heads do not require `les`. Energy with a charge head,
+NewtonNet energy/force heads do not require `les`. A charge head placed before energy,
 BEC and legacy full pickles containing LES objects need that optional library
 (`python -m pip install -e ".[les]"`). Existing state-dict checkpoints retain their parameter
 names and use the bundled implementations. Old fully serialized model files
@@ -118,6 +118,31 @@ revision for export and an explicit architecture migration; they are not
 silently treated as current NewtonNet models.
 
 ## Units, cells, and patches
+
+### Optional supervised atomic charges
+
+Both bundled NewtonNet and TensorNet support charge prediction. In the WebUI,
+enable **训练原子电荷预测**, set its loss weight, and map the charge label file.
+The standard filename is `charges.npy`; grouped QM data defaults to
+`qm_charge_{shard}.npy` and can be changed to your actual filename. Dense labels
+have shape `[samples, atoms]` or `[samples, atoms, 1]`; ragged labels have shape
+`[total_atoms]` or `[total_atoms, 1]`. Charge labels are in elementary-charge units
+and are not rescaled by the energy/length conversion settings. This is distinct
+from the dataset field `charge`, which represents an input total molecular charge.
+
+The Python/YAML equivalent is `loss_weights: {energy: 1, forces: 1, charges: 1}`.
+Selecting `charges` automatically adds the matching output head. NewtonNet
+appends it after existing heads, so it is an independent supervised prediction,
+not an automatic LES energy correction. Existing custom configurations with
+charge before energy keep the original LES behavior and require `les`.
+
+Training, validation and periodic testing record charge MSE. Standalone
+evaluation offers **评估原子电荷** and reports charge MAE/RMSE/MSE. Charge-only
+training/evaluation is also allowed. ASE inference uses `properties=["charges"]`
+and `atoms.get_charges()`. No total-charge conservation constraint is imposed.
+Checkpoint loading remains strict: an energy-only checkpoint cannot gain a
+trained charge head merely by enabling this option; train from scratch or use
+a checkpoint already containing the matching head. Defaults remain energy/forces.
 
 ASE expects eV, Angstrom, eV/Angstrom, eV/Angstrom^3, elementary charges, and
 e*Angstrom dipoles. MLPUI defaults to those units; it cannot infer training units.

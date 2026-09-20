@@ -22,7 +22,8 @@ by the unified trainer; TensorNet is provided by `torchmdnet/models/tensornet.py
 Integration changes:
 
 - Python imports use the `mlpui.models` namespace without global module aliases.
-- NewtonNet imports `les` only when an LES output head is instantiated.
+- NewtonNet imports `les` only for BEC or for charge-before-energy configurations
+  that use LES. A charge head after energy provides independent charge prediction.
 - Native neighbor operators use the distinct `mlpui_torchmdnet_extensions`
   namespace to coexist with external packages. Native kernels remain optional.
 - `torchmdnet/extensions/ops.py` provides a differentiable PyTorch fallback,

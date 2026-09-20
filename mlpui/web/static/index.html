@@ -40,6 +40,7 @@
       </div><details id="file-details"><summary>文件映射与单位</summary><p class="hint">{shard} 会替换成分组名。公共原子类型文件无需占位符。</p><div class="grid two">
         <label>原子类型<input id="file-z" value="full_qm_type.npy" required></label><label>坐标<input id="file-pos" value="qm_coord_{shard}.npy" required></label>
         <label>能量<input id="file-energy" value="energy_{shard}.npy"></label><label>力 / 梯度<input id="file-forces" value="qm_grad_{shard}.npy"></label>
+        <label>原子电荷标签<input id="file-charges" value="qm_charge_{shard}.npy"><small>可选；标准格式 charges.npy。形状 [结构数, 原子数] 或末尾加 1；单位 e。</small></label>
         <label>晶胞 <span class="optional">可选</span><input id="file-cell" placeholder="cell_{shard}.npy"></label><label>周期性 <span class="optional">可选</span><input id="file-pbc" placeholder="pbc_{shard}.npy"></label>
         <label>原子索引 offsets <span class="optional">变原子数时填写</span><input id="file-offsets" placeholder="offsets.npy"></label>
         <label>能量换算系数<input id="energy-scale" type="number" value="1" min="0.000000000001" step="any" required></label>
@@ -49,6 +50,9 @@
       <div class="panel form-panel"><h2><b class="step">03</b> 运行参数</h2><div class="grid three">
         <label id="eval-energy-label" hidden><input id="eval-energy" type="checkbox" checked>评估能量</label>
         <label id="eval-forces-label" hidden><input id="eval-forces" type="checkbox" checked>评估力</label>
+        <label id="eval-charges-label" hidden><input id="eval-charges" type="checkbox">评估原子电荷</label>
+        <label class="check"><input id="train-charges" type="checkbox">训练原子电荷预测<small>默认关闭；自动添加电荷输出头。请填写原子电荷 npy 标签；已有模型须包含匹配的电荷权重。</small></label>
+        <label>原子电荷损失权重<input id="weight-charges" type="number" value="1" min="0.000000000001" step="any" required><small>仅勾选电荷预测时使用。</small></label>
         <label>Epochs<input id="epochs" type="number" value="10" min="1" step="1" required></label>
         <label>Batch size<input id="batch-size" type="number" value="4" min="1" step="1" required></label>
         <label>学习率<input id="learning-rate" type="number" value="0.001" min="0.000000000001" step="any" required></label>
@@ -60,15 +64,15 @@
         <label>保存间隔 N（epoch）<input id="save-interval" type="number" value="10" min="0" step="1" required><small>0 表示关闭定期保存。</small></label>
         <label>最多保留 checkpoint 数量<input id="max-checkpoints" type="number" value="3" min="1" step="1" required><small>保留最新的文件；不含最终 model.pt。</small></label>
         <label>测试间隔 M（epoch）<input id="test-interval" type="number" value="1" min="1" step="1" required><small>填写测试集后，在 M 的倍数 epoch 评估。</small></label>
-      </div><p id="training-hint" class="hint">权重设为 0 可关闭该项。每个 batch 累积多个结构的梯度。</p></div>
+      </div><p id="training-hint" class="hint">能量或力权重设为 0 可关闭该项；电荷由勾选框启用。每个 batch 累积多个结构的梯度。</p></div>
       </div><div class="form-side"><div class="panel summary"><div class="eyebrow">READY WHEN YOU ARE</div><h2>开始一次实验</h2><p>数据配置、参数和运行记录会保存在独立任务目录中。</p><ul><li>训练模型或评估已有模型</li><li>实时进度、指标与日志</li><li>任务结果独立保存</li></ul><button class="primary" id="start" type="submit">开始训练 <span>→</span></button><small>任务在后台运行，关闭浏览器不影响任务。</small></div></div></div>
     </form>
   </section>
   <section id="detail-view" hidden>
     <div class="page-title"><div><a href="#jobs" class="back">← 全部任务</a><h1 id="detail-name"></h1><p id="detail-meta"></p></div><button id="stop" class="danger">停止训练</button></div>
     <div class="panel progress-panel"><div><span id="detail-status" class="badge"></span><span id="progress-label"></span></div><progress id="progress" value="0" max="100"></progress><p id="detail-error" role="alert" hidden></p></div>
-    <div id="evaluation-panel" class="panel" hidden><div class="panel-heading"><h2>评估结果</h2><a id="download-evaluation" target="_blank" rel="noopener">查看结果 JSON ↗</a></div><div id="evaluation-metrics" class="output"></div><p class="footnote">能量按结构统计；力按全部原子的笛卡尔分量统计。单位沿用数据换算设置，不拟合能量偏移。</p></div>
-    <div class="panel chart-panel"><div class="panel-heading"><h2>训练损失</h2><select id="metric" aria-label="损失类型"><option value="energy">Energy MSE</option><option value="forces">Forces MSE</option></select></div><div id="chart"></div><div class="legend"><span><i class="line purple"></i>训练集</span><span><i class="line green"></i>验证集</span><span><i class="line" style="background:#f4bb75"></i>测试集</span><span class="muted">按实际评估 epoch 显示 · 线性坐标</span></div><p id="test-result" class="footnote" style="padding:0 23px 18px"></p></div>
+    <div id="evaluation-panel" class="panel" hidden><div class="panel-heading"><h2>评估结果</h2><a id="download-evaluation" target="_blank" rel="noopener">查看结果 JSON ↗</a></div><div id="evaluation-metrics" class="output"></div><p class="footnote">能量按结构统计；力按全部原子的笛卡尔分量统计；电荷按原子统计。单位沿用数据换算设置，不拟合能量偏移。</p></div>
+    <div class="panel chart-panel"><div class="panel-heading"><h2>训练损失</h2><select id="metric" aria-label="损失类型"><option value="energy">Energy MSE</option><option value="forces">Forces MSE</option><option value="charges">Charges MSE</option></select></div><div id="chart"></div><div class="legend"><span><i class="line purple"></i>训练集</span><span><i class="line green"></i>验证集</span><span><i class="line" style="background:#f4bb75"></i>测试集</span><span class="muted">按实际评估 epoch 显示 · 线性坐标</span></div><p id="test-result" class="footnote" style="padding:0 23px 18px"></p></div>
     <div class="panel"><div class="panel-heading"><h2>输出文件</h2><a id="download-model" class="button" hidden>下载模型 ↓</a></div><div class="output"><span class="muted">任务目录</span><code id="output-path"></code><a id="download-config" target="_blank" rel="noopener">查看配置 ↗</a></div></div>
     <div class="panel"><div class="panel-heading"><h2>定期保存的 Checkpoints</h2><span class="muted">最新在前</span></div><div id="checkpoint-list" class="output"></div></div>
     <div class="panel"><div class="panel-heading"><h2>运行日志</h2><span class="muted">最近 32 KB</span></div><pre id="log">等待训练进程输出…</pre></div>

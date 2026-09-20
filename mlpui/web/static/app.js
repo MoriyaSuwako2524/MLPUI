@@ -16,14 +16,14 @@ function groups(id) { return text(id).split(',').map(v=>v.trim()).filter(Boolean
 function payload() {
   const evaluating=text('task-type')==='evaluation';
   const weights={};
-  for(const key of ['energy','forces']) {
+  for(const key of ['energy','forces','charges']) {
     if(evaluating) {if($('eval-'+key).checked) weights[key]=1;}
-    else if(number('weight-'+key)>0) weights[key]=number('weight-'+key);
+    else if((key!=='charges'||$('train-charges').checked)&&number('weight-'+key)>0) weights[key]=number('weight-'+key);
   }
-  if(!Object.keys(weights).length) throw new Error('至少选择能量或力中的一项');
+  if(!Object.keys(weights).length) throw new Error('至少选择能量、力或原子电荷中的一项');
   const files={};
-  for(const key of ['z','pos','energy','forces','cell','pbc','offsets']) {
-    if(['energy','forces'].includes(key) && !(key in weights)) continue;
+  for(const key of ['z','pos','energy','forces','charges','cell','pbc','offsets']) {
+    if(['energy','forces','charges'].includes(key) && !(key in weights)) continue;
     if(text('file-'+key)) files[key]=text('file-'+key);
   }
   for(const key of Object.keys(weights)) if(!files[key]) throw new Error('请填写 '+key+' 标签文件');
@@ -150,19 +150,21 @@ function updateTaskType() {
   $('split-hint').hidden=evaluating;
   $('training-hint').hidden=evaluating;
   $('start').textContent=evaluating?'开始评估 →':'开始训练 →';
-  for(const id of ['epochs','batch-size','learning-rate','seed','weight-energy','weight-forces','save-interval','max-checkpoints','test-interval','validation-shards','validation-directory','test-shards','test-directory']) {
+  for(const id of ['epochs','batch-size','learning-rate','seed','weight-energy','weight-forces','train-charges','weight-charges','save-interval','max-checkpoints','test-interval','validation-shards','validation-directory','test-shards','test-directory']) {
     $(id).closest('label').hidden=evaluating; $(id).disabled=evaluating;
   }
-  for(const id of ['eval-energy','eval-forces']) $(id).closest('label').hidden=!evaluating;
+  for(const id of ['eval-energy','eval-forces','eval-charges']) $(id).closest('label').hidden=!evaluating;
+  $('weight-charges').disabled=evaluating||!$('train-charges').checked;
   $('new-view').querySelector('h1').textContent=evaluating?'创建评估任务':'创建训练任务';
   $('new-view').querySelector('.page-title p').textContent=evaluating?'选择已有模型和带标签的 npy 数据，计算误差。模型结构配置须与原模型一致。':'选择模型，连接 NumPy 数据，然后开始训练。';
   $('preview-result').textContent='检查文件、数组形状与标签。';
 }
 $('task-type').addEventListener('change',updateTaskType);
+$('train-charges').addEventListener('change',()=>{$('weight-charges').disabled=!$('train-charges').checked;});
 $('layout').addEventListener('change',()=>{
   const standard=text('layout')==='standard';
   if(text('layout')==='custom'){$('file-details').open=true;return;}
-  const mapping=standard?{z:'z.npy',pos:'pos.npy',energy:'energy.npy',forces:'forces.npy'}:{z:'full_qm_type.npy',pos:'qm_coord_{shard}.npy',energy:'energy_{shard}.npy',forces:'qm_grad_{shard}.npy'};
+  const mapping=standard?{z:'z.npy',pos:'pos.npy',energy:'energy.npy',forces:'forces.npy',charges:'charges.npy'}:{z:'full_qm_type.npy',pos:'qm_coord_{shard}.npy',energy:'energy_{shard}.npy',forces:'qm_grad_{shard}.npy',charges:'qm_charge_{shard}.npy'};
   Object.entries(mapping).forEach(([k,v])=>$('file-'+k).value=v);
   $('shards').value=standard?'':'w00, w01'; $('validation-shards').value=''; $('test-shards').value=''; $('gradients').checked=!standard;
 });
@@ -190,6 +192,6 @@ async function init(){
   try{const config=await api('/api/presets');models=config.models;$('model-config').value=JSON.stringify(models.newtonnet,null,2);$('runs-root').textContent='输出位置 · '+config.root;
     const gpu=$('device').querySelector('[value="cuda"]');gpu.disabled=!config.cuda;if(!config.cuda)gpu.textContent='GPU · 未检测到 CUDA';$('start').disabled=false;
   }catch(error){notify(error.message);}
-  route();setInterval(refresh,2000);
+  updateTaskType();route();setInterval(refresh,2000);
 }
 init();

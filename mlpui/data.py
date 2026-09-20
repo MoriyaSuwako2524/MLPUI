@@ -64,7 +64,7 @@ class NpyDataset(Dataset):
             raise ValueError("z.npy must contain integer atomic numbers 1..118; padding is unsupported")
         shapes = {
             "energy": ((self.size,), (self.size, 1)),
-            "forces": (pos.shape,), "charges": (atomic_shape,),
+            "forces": (pos.shape,), "charges": (atomic_shape, atomic_shape + (1,)),
             "dipole": ((self.size, 3),), "stress": ((self.size, 3, 3),),
             "cell": ((self.size, 3, 3),), "pbc": ((self.size, 3),),
             "charge": ((self.size,),), "spin": ((self.size,),),

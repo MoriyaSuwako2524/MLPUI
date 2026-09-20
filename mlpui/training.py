@@ -20,6 +20,27 @@ class TrainingStopped(Exception):
     """Cooperative cancellation at a structure boundary."""
 
 
+def configure_charge_head(family, model_config, targets):
+    """Enable an independent atomic-charge output when charge labels are selected.
+
+    Existing heads and their order are preserved. A checkpoint must already
+    contain these learned parameters; loading remains strict.
+    """
+    model_config = copy.deepcopy(model_config)
+    if "charges" in targets:
+        if family == "newtonnet":
+            config = model_config.get("model", model_config)
+            outputs = list(config.get("output_properties", []))
+            if "charge" not in outputs:
+                outputs.append("charge")
+            config["output_properties"] = outputs
+        else:
+            heads = dict(model_config.get("pred_dict", {"y": 1., "neg_dy": 1.}))
+            heads.setdefault("charge", 1.)
+            model_config["pred_dict"] = heads
+    return model_config
+
+
 @dataclass
 class TrainingConfig:
     epochs: int = 10
@@ -64,6 +85,7 @@ class Trainer:
             raise ValueError("Training currently supports torchmdnet and newtonnet")
         self.config = config or TrainingConfig()
         self.model_config = _config_dict(model_config)
+        self.model_config = configure_charge_head(self.family, self.model_config, self.config.loss_weights)
         if self.family == "newtonnet" and isinstance(self.model_config.get("model"), dict):
             self.model_config = self.model_config["model"]
         torch.manual_seed(self.config.seed)

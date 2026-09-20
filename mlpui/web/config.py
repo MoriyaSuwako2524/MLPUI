@@ -27,7 +27,7 @@ def dataset(spec):
 
 
 def normalize(payload):
-    from mlpui.training import TrainingConfig
+    from mlpui.training import TrainingConfig, configure_charge_head
     import torch
     value = copy.deepcopy(payload)
     if not isinstance(value, dict):
@@ -56,6 +56,8 @@ def normalize(payload):
         raise ValueError("Precision must be float32 or float64")
     TrainingConfig(**{**options, "dtype": getattr(torch, dtype)})
     value["training"] = options
+    value["model_config"] = configure_charge_head(
+        value["family"], value["model_config"], options.get("loss_weights", {}))
     for key in (("evaluation",) if evaluating else ("train", "validation", "test")):
         spec = value.get(key)
         if key in ("validation", "test") and not spec:
