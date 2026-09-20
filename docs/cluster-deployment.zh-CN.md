@@ -143,6 +143,27 @@ ssh -N -o ExitOnForwardFailure=yes -J USER@LOGIN -L 127.0.0.1:2526:127.0.0.1:252
 
 ### 方式 B：不允许 SSH 进入计算节点，但允许计算节点 SSH 回登录节点
 
+启动脚本已支持自动建立反向隧道：设置 `MLPUI_LOGIN_HOST` 即启用，`MLPUI_LOGIN_USER` 默认是当前用户名。隧道仅监听登录节点的 `127.0.0.1`，建立失败时不启动 WebUI，脚本退出时关闭自己创建的隧道。连接中断时 SSH 会通过保活检测退出，但不会自动重新认证；需要重新建立隧道。
+
+**目前需要密码时**，在登录节点、项目目录中运行以下命令。使用交互式 GPU 作业，SSH 可以正常请求密码；不把密码写入文件：
+
+```bash
+git pull --ff-only
+export MLPUI_ROOT="$PWD"
+export MLPUI_LOGIN_HOST="$(hostname -f)"
+export MLPUI_LOGIN_USER=moriya2524
+export MLPUI_PYTHON="$HOME/.conda/envs/newtonnet/bin/python"
+srun --partition=gpu --nodes=1 --ntasks=1 --cpus-per-task=4 \
+  --gres=gpu:1 --time=12:00:00 --exclude=c302,c301 --job-name=mlpui-web \
+  --pty bash scripts/slurm/mlpui_web.sbatch
+```
+
+等待 GPU 分配，按 SSH 提示认证，随后脚本启动 WebUI 并打印本地转发命令。保持此交互会话开启；`srun` 启动时不会读取脚本内的 `#SBATCH` 指令，所以资源参数已显式列在命令中。`hostname -f` 固定实际登录节点；本地必须能够解析并访问这个地址，否则需使用管理员提供的该节点外部地址。
+
+**计算节点到登录节点已可免交互认证时**，设置同样的环境变量后，可以改用 `mkdir -p logs` 和 `sbatch scripts/slurm/mlpui_web.sbatch`。批处理模式使用 `BatchMode=yes`，认证失败会退出并在日志解释原因；不会等待无法输入的密码。
+
+如果希望沿用已经启动的 WebUI，也可以只手动添加隧道：
+
 此方式取决于集群是否允许 `srun --jobid` 附加交互步骤、SSH 反向转发。不要在批处理脚本里放密码。先在登录节点的交互终端中进入自己分配到的计算节点：
 
 ```bash

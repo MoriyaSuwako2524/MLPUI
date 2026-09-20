@@ -12,7 +12,8 @@
 
 # Submit from the MLPUI project root, AFTER running: mkdir -p logs
 # Optional overrides: MLPUI_ROOT, MLPUI_PYTHON, MLPUI_PORT, MLPUI_RUNS_DIR,
-#                     MLPUI_ID_SCRIPT (your existing site-specific id.py).
+#                     MLPUI_ID_SCRIPT (your existing site-specific id.py),
+#                     MLPUI_LOGIN_HOST, MLPUI_LOGIN_USER (reverse SSH tunnel).
 set -euo pipefail
 
 # Use an already prepared GPU environment, just like the working ComfyUI job.
@@ -24,7 +25,7 @@ PYTHON="${MLPUI_PYTHON:-${HOME}/.conda/envs/newtonnet/bin/python}"
     exit 1
 }
 
-MLPUI_ROOT="${MLPUI_ROOT:-${SLURM_SUBMIT_DIR:?Submit this script with sbatch}}"
+MLPUI_ROOT="${MLPUI_ROOT:-${SLURM_SUBMIT_DIR:-$PWD}}"
 Port="${MLPUI_PORT:-2526}"
 RUNS_DIR="${MLPUI_RUNS_DIR:-${MLPUI_ROOT}/runs/cluster-web}"
 export OMP_NUM_THREADS="${SLURM_CPUS_PER_TASK:-1}"
@@ -65,10 +66,50 @@ if [[ -n "${MLPUI_ID_SCRIPT:-}" ]]; then
     "$PYTHON" "$MLPUI_ID_SCRIPT" "$SLURM_JOB_ID" "$Port"
 fi
 
-echo "From your computer (replace USER, LOGIN and GPU_NODE):"
-echo "ssh -N -o ExitOnForwardFailure=yes -J USER@LOGIN -L 127.0.0.1:${Port}:127.0.0.1:${Port} USER@GPU_NODE"
+TUNNEL_DIR=""
+WEB_PID=""
+cleanup() {
+    if [[ -n "$WEB_PID" ]]; then
+        kill "$WEB_PID" 2>/dev/null || true
+        wait "$WEB_PID" 2>/dev/null || true
+    fi
+    if [[ -n "$TUNNEL_DIR" ]]; then
+        ssh -S "$TUNNEL_DIR/control" -O exit "$LOGIN_TARGET" 2>/dev/null || true
+        rmdir "$TUNNEL_DIR" 2>/dev/null || true
+    fi
+}
+trap cleanup EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
+
+if [[ -n "${MLPUI_LOGIN_HOST:-}" ]]; then
+    LOGIN_TARGET="${MLPUI_LOGIN_USER:-$USER}@${MLPUI_LOGIN_HOST}"
+    TUNNEL_DIR=$(mktemp -d /tmp/mlpui-ssh.XXXXXXXX)
+    SSH_AUTH=()
+    if [[ ! -t 0 ]]; then
+        # Batch jobs cannot prompt for passwords or unknown host keys.
+        SSH_AUTH=(-o BatchMode=yes)
+    fi
+    echo "Opening reverse tunnel to $LOGIN_TARGET (may request your password)."
+    if ! ssh -fNT -M -S "$TUNNEL_DIR/control" "${SSH_AUTH[@]}" \
+        -o ExitOnForwardFailure=yes -o ConnectTimeout=20 \
+        -o ServerAliveInterval=30 -o ServerAliveCountMax=3 \
+        -R "127.0.0.1:${Port}:127.0.0.1:${Port}" "$LOGIN_TARGET"; then
+        echo "Reverse tunnel failed; WebUI was not started." >&2
+        echo "If SSH needs a password, run this script with srun --pty bash inside a GPU allocation." >&2
+        echo "Also check the login host, host key, and whether its port $Port is already in use." >&2
+        exit 1
+    fi
+    echo "From your computer, connect to the SAME actual login node:"
+    echo "ssh -N -o ExitOnForwardFailure=yes -o ServerAliveInterval=30 -L 127.0.0.1:${Port}:127.0.0.1:${Port} $LOGIN_TARGET"
+else
+    echo "From your computer (replace USER, LOGIN and GPU_NODE):"
+    echo "ssh -N -o ExitOnForwardFailure=yes -J USER@LOGIN -L 127.0.0.1:${Port}:127.0.0.1:${Port} USER@GPU_NODE"
+fi
 echo "Then open http://127.0.0.1:${Port} and select GPU / CUDA when creating a task."
 echo "Stop the training in the UI and wait for model.pt before cancelling the Slurm job."
 
-# Keep the server in the foreground for the lifetime of the allocation.
-exec "$PYTHON" -u -m mlpui.web --port "$Port" --runs-dir "$RUNS_DIR"
+# Wait for the server and close our reverse tunnel when the script exits.
+"$PYTHON" -u -m mlpui.web --port "$Port" --runs-dir "$RUNS_DIR" &
+WEB_PID=$!
+wait "$WEB_PID"
