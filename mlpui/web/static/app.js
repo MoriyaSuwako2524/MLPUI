@@ -31,6 +31,15 @@ function payload() {
   if(groups('shards').length) train.shards=groups('shards');
   let model;
   try { model=JSON.parse($('model-config').value); } catch { throw new Error('模型结构配置不是有效的 JSON'); }
+  const modelSettings=text('family')==='newtonnet'?(model.model||model):model;
+  if($('charge-constraint').checked) {
+    if(!('charges' in weights)) throw new Error('请同时启用原子电荷训练或评估');
+    modelSettings.charge_constraint=true;
+  }
+  if(modelSettings.charge_constraint) {
+    if(!text('file-charge')) throw new Error('硬约束需要每个结构的总电荷 Q 文件');
+    files.charge=text('file-charge');
+  }
   if(evaluating) {
     if(!text('checkpoint')) throw new Error('评估需要填写已有模型路径');
     return {task_type:'evaluation',name:text('name'),family:text('family'),model_config:model,
@@ -164,7 +173,7 @@ $('train-charges').addEventListener('change',()=>{$('weight-charges').disabled=!
 $('layout').addEventListener('change',()=>{
   const standard=text('layout')==='standard';
   if(text('layout')==='custom'){$('file-details').open=true;return;}
-  const mapping=standard?{z:'z.npy',pos:'pos.npy',energy:'energy.npy',forces:'forces.npy',charges:'charges.npy'}:{z:'full_qm_type.npy',pos:'qm_coord_{shard}.npy',energy:'energy_{shard}.npy',forces:'qm_grad_{shard}.npy',charges:'qm_charge_{shard}.npy'};
+  const mapping=standard?{z:'z.npy',pos:'pos.npy',energy:'energy.npy',forces:'forces.npy',charges:'charges.npy',charge:'charge.npy'}:{z:'full_qm_type.npy',pos:'qm_coord_{shard}.npy',energy:'energy_{shard}.npy',forces:'qm_grad_{shard}.npy',charges:'qm_charge_{shard}.npy',charge:'total_charge_{shard}.npy'};
   Object.entries(mapping).forEach(([k,v])=>$('file-'+k).value=v);
   $('shards').value=standard?'':'w00, w01'; $('validation-shards').value=''; $('test-shards').value=''; $('gradients').checked=!standard;
 });

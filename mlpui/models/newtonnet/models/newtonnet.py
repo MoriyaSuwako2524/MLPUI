@@ -7,6 +7,7 @@ from mlpui.models.newtonnet.layers.scalers import get_scaler_by_string
 from mlpui.models.newtonnet.layers.representations import EdgeEmbedding
 from mlpui.models.newtonnet.models.output import get_output_by_string, get_aggregator_by_string
 from mlpui.models.newtonnet.models.output import CustomOutputSet, DerivativeProperty
+from mlpui.models.charge import constrain_charges
 
 
 class NewtonNet(nn.Module):
@@ -32,9 +33,15 @@ class NewtonNet(nn.Module):
             activation: str = 'swish',
             layer_norm: bool = False,
             output_properties: list = [],
+            charge_constraint: bool = False,
     ) -> None:
 
         super().__init__()
+        if not isinstance(charge_constraint, bool):
+            raise ValueError("charge_constraint must be boolean")
+        if charge_constraint and "charge" not in output_properties:
+            raise ValueError("Total-charge constraint requires a charge output head")
+        self.charge_constraint = charge_constraint
         activation = get_activation_by_string(activation)
 
         # embedding layer
@@ -75,7 +82,7 @@ class NewtonNet(nn.Module):
 
 
     # def forward(self, batch):
-    def forward(self, z, pos, cell, batch):
+    def forward(self, z, pos, cell, batch, q=None):
         '''
         Network forward pass
 
@@ -103,6 +110,8 @@ class NewtonNet(nn.Module):
             output = output_layer(outputs)
             output = scaler(output, outputs)
             output = aggregator(output, outputs)
+            if key == "charge" and getattr(self, "charge_constraint", False):
+                output = constrain_charges(output, batch, q)
             setattr(outputs, key, output)
 
         return outputs

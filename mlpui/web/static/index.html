@@ -41,6 +41,7 @@
         <label>原子类型<input id="file-z" value="full_qm_type.npy" required></label><label>坐标<input id="file-pos" value="qm_coord_{shard}.npy" required></label>
         <label>能量<input id="file-energy" value="energy_{shard}.npy"></label><label>力 / 梯度<input id="file-forces" value="qm_grad_{shard}.npy"></label>
         <label>原子电荷标签<input id="file-charges" value="qm_charge_{shard}.npy"><small>可选；标准格式 charges.npy。形状 [结构数, 原子数] 或末尾加 1；单位 e。</small></label>
+        <label>每个结构的总电荷 Q<input id="file-charge" value="total_charge_{shard}.npy"><small>硬约束必填；标准格式 charge.npy，形状 [结构数] 或 [结构数, 1]，单位 e。</small></label>
         <label>晶胞 <span class="optional">可选</span><input id="file-cell" placeholder="cell_{shard}.npy"></label><label>周期性 <span class="optional">可选</span><input id="file-pbc" placeholder="pbc_{shard}.npy"></label>
         <label>原子索引 offsets <span class="optional">变原子数时填写</span><input id="file-offsets" placeholder="offsets.npy"></label>
         <label>能量换算系数<input id="energy-scale" type="number" value="1" min="0.000000000001" step="any" required></label>
@@ -51,6 +52,7 @@
         <label id="eval-energy-label" hidden><input id="eval-energy" type="checkbox" checked>评估能量</label>
         <label id="eval-forces-label" hidden><input id="eval-forces" type="checkbox" checked>评估力</label>
         <label id="eval-charges-label" hidden><input id="eval-charges" type="checkbox">评估原子电荷</label>
+        <label class="check"><input id="charge-constraint" type="checkbox">总电荷硬约束<small>每个结构的原子电荷之和固定为给定 Q；需在文件映射中提供总电荷 npy，不能留空默认中性。</small></label>
         <label class="check"><input id="train-charges" type="checkbox">训练原子电荷预测<small>默认关闭；自动添加电荷输出头。请填写原子电荷 npy 标签；已有模型须包含匹配的电荷权重。</small></label>
         <label>原子电荷损失权重<input id="weight-charges" type="number" value="1" min="0.000000000001" step="any" required><small>仅勾选电荷预测时使用。</small></label>
         <label>Epochs<input id="epochs" type="number" value="10" min="1" step="1" required></label>

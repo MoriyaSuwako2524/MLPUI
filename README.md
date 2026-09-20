@@ -139,10 +139,42 @@ charge before energy keep the original LES behavior and require `les`.
 Training, validation and periodic testing record charge MSE. Standalone
 evaluation offers **评估原子电荷** and reports charge MAE/RMSE/MSE. Charge-only
 training/evaluation is also allowed. ASE inference uses `properties=["charges"]`
-and `atoms.get_charges()`. No total-charge conservation constraint is imposed.
+and `atoms.get_charges()`. Total-charge conservation is optional, as described below.
 Checkpoint loading remains strict: an energy-only checkpoint cannot gain a
 trained charge head merely by enabling this option; train from scratch or use
 a checkpoint already containing the matching head. Defaults remain energy/forces.
+
+### Optional hard total-charge constraint
+
+Enable **总电荷硬约束** together with charge training/evaluation. Supply a second
+NumPy file for the total charge Q of every structure: `charge.npy` in standard
+layout or `total_charge_{shard}.npy` in grouped layout (custom names supported).
+Its shape is `[samples]` or `[samples, 1]`, in units of e. This is separate from
+the atomwise `charges.npy` labels. Missing Q is an error, including for neutral
+systems: write an explicit array of zeros when all structures are neutral.
+
+The equivalent model configuration is `charge_constraint: true`. After charge
+scaling, the model applies `q_i += (Q - sum(q)) / N` separately to each structure.
+This differentiable projection is used during training, validation, evaluation
+and inference, including batches of different atom counts. NewtonNet applies it
+before any downstream LES energy term when a charge-before-energy configuration
+is used. Labels are not silently changed; ensure their sums are consistent with Q.
+Conservation holds to floating-point precision, not exact real arithmetic.
+
+The setting is saved in the checkpoint's `model_config`. Loading preserves it
+even if a caller's architecture configuration omits the flag; explicitly trying
+to disable a saved constraint raises an error. In WebUI evaluation, enable the
+option to include the Q-file mapping. ASE callers must supply Q explicitly:
+
+```python
+atoms.calc = CalculatorBuilder.from_checkpoint(
+    "model.pt", device="cpu", properties=["charges"], charge=1.0,
+).build()
+charges = atoms.get_charges()  # sum is 1.0 within numerical precision
+```
+
+Direct model calls pass one Q per structure as `q=...` to either backend.
+Leaving the constraint disabled preserves the existing unconstrained behavior.
 
 ASE expects eV, Angstrom, eV/Angstrom, eV/Angstrom^3, elementary charges, and
 e*Angstrom dipoles. MLPUI defaults to those units; it cannot infer training units.

@@ -10,13 +10,18 @@ from mlpui.calculator import InputAdapter, OutputAdapter, MLPCalculator
 
 
 class AtomicInputAdapter(InputAdapter):
-    def __init__(self, family, length_to_angstrom=1.0, charge=0, spin=0):
+    def __init__(self, family, length_to_angstrom=1.0, charge=None, spin=0, require_charge=False):
         self.family = family
         self.length_to_angstrom = length_to_angstrom
         self.charge = charge
         self.spin = spin
+        self.require_charge = require_charge
 
     def convert(self, atoms, device, dtype):
+        if self.require_charge and self.charge is None:
+            raise ValueError("Total-charge constraint requires explicit Q (CalculatorBuilder charge=...)")
+        if self.charge is not None and not np.isfinite(self.charge):
+            raise ValueError("Total charge Q must be finite")
         if np.any(atoms.pbc) and not np.all(atoms.pbc):
             raise ValueError("These backends support nonperiodic or fully periodic cells; mixed PBC is unsupported")
         periodic = bool(np.all(atoms.pbc))
@@ -32,9 +37,11 @@ class AtomicInputAdapter(InputAdapter):
         }
         if self.family == "newtonnet":
             data["cell"] = torch.tensor(cell, dtype=dtype, device=device).unsqueeze(0)
+            if self.charge is not None:
+                data["q"] = torch.tensor([self.charge], dtype=dtype, device=device)
         else:
             data["box"] = torch.tensor(cell, dtype=dtype, device=device) if periodic else None
-            data["q"] = torch.tensor([self.charge], dtype=dtype, device=device)
+            data["q"] = torch.tensor([self.charge if self.charge is not None else 0], dtype=dtype, device=device)
             data["s"] = torch.tensor([self.spin], dtype=dtype, device=device)
         return data
 
@@ -157,7 +164,8 @@ def build_external_calculator(builder, family, device):
     dtype = builder.dtype or builder.model_patcher.get_dtype()
     return ExternalCalculator(
         family=family, model_patcher=builder.model_patcher,
-        input_adapter=AtomicInputAdapter(family, builder.length_to_angstrom, builder.charge, builder.spin),
+        input_adapter=AtomicInputAdapter(family, builder.length_to_angstrom, builder.charge, builder.spin,
+                                         require_charge=getattr(builder.model_patcher.model, "charge_constraint", False)),
         output_adapter=AtomicOutputAdapter(builder.properties, *factors),
         properties=builder.properties, dtype=dtype, device=device,
         keep_on_device=builder.keep_on_device,

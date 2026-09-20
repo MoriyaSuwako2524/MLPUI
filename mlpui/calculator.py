@@ -351,7 +351,7 @@ class CalculatorBuilder:
     model_patcher: Any
     properties: list[str] = field(default_factory=lambda: ["energy", "forces"])
     task: str | None = None
-    charge: int = 0
+    charge: float | None = None
     spin: int = 0
     dtype: torch.dtype | None = None
     device: torch.device | str | None = None
@@ -437,7 +437,7 @@ class CalculatorBuilder:
 
         if family == "uma":
             return UMAInputAdapter(
-                charge=self.charge,
+                charge=self.charge if self.charge is not None else 0,
                 spin=self.spin,
                 task=self.task,
             )

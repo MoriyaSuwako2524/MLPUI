@@ -67,7 +67,7 @@ class NpyDataset(Dataset):
             "forces": (pos.shape,), "charges": (atomic_shape, atomic_shape + (1,)),
             "dipole": ((self.size, 3),), "stress": ((self.size, 3, 3),),
             "cell": ((self.size, 3, 3),), "pbc": ((self.size, 3),),
-            "charge": ((self.size,),), "spin": ((self.size,),),
+            "charge": ((self.size,), (self.size, 1)), "spin": ((self.size,),),
         }
         for name, allowed in shapes.items():
             if name in self.arrays and self.arrays[name].shape not in allowed:

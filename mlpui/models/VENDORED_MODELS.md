@@ -32,6 +32,9 @@ Integration changes:
 - Existing state dictionaries keep their parameter names. Explicitly trusted
   full-model pickle loading remaps historical Python module names to these
   implementations; missing historical classes still require source-side export.
+- Optional `charge_constraint` projects predicted atomic charges to an explicitly
+  supplied total Q per structure. It runs after scaling, before downstream
+  NewtonNet outputs, and is stored with model configuration (no new parameters).
 
 Do not use `scripts/install_local_backends.py` for normal installation. That
 legacy helper only prepares external reference packages for comparison tests.

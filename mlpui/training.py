@@ -27,6 +27,9 @@ def configure_charge_head(family, model_config, targets):
     contain these learned parameters; loading remains strict.
     """
     model_config = copy.deepcopy(model_config)
+    config = model_config.get("model", model_config) if family == "newtonnet" else model_config
+    if not isinstance(config.get("charge_constraint", False), bool):
+        raise ValueError("charge_constraint must be boolean")
     if "charges" in targets:
         if family == "newtonnet":
             config = model_config.get("model", model_config)
@@ -105,6 +108,8 @@ class Trainer:
             from mlpui.models.newtonnet.models.newtonnet import NewtonNet
             self.model = NewtonNet(**self.model_config)
         self.model.to(device=self.config.device, dtype=self.config.dtype)
+        if getattr(self.model, "charge_constraint", False):
+            self.model_config["charge_constraint"] = True
         if self.family == "torchmdnet":
             if self.model_config.get("output_model", "Scalar") != "Scalar":
                 raise ValueError("Training requires a Scalar primary energy head")
@@ -119,8 +124,10 @@ class Trainer:
         atoms = NpyDataset.atoms(sample)
         if "stress" in self.config.loss_weights and not np.all(atoms.pbc):
             raise ValueError("Stress training requires periodic structures")
-        inputs = AtomicInputAdapter(self.family, charge=float(sample.get("charge", 0)),
-                                    spin=float(sample.get("spin", 0))).convert(
+        inputs = AtomicInputAdapter(self.family,
+                                    charge=float(np.asarray(sample["charge"]).item()) if "charge" in sample else None,
+                                    spin=float(sample.get("spin", 0)),
+                                    require_charge=getattr(self.model, "charge_constraint", False)).convert(
                                         atoms, self.config.device, self.config.dtype)
         if self.family == "torchmdnet":
             for module in self.model.modules():

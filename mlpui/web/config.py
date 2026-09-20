@@ -102,6 +102,11 @@ def normalize(payload):
 def inspect_data(settings):
     result = {}
     labels = set(settings["training"].get("loss_weights", {"energy": 1, "forces": 1}))
+    model_config = settings["model_config"]
+    if settings["family"] == "newtonnet":
+        model_config = model_config.get("model", model_config)
+    if model_config.get("charge_constraint", False):
+        labels.add("charge")
     for key in ("train", "validation", "test", "evaluation"):
         if key not in settings:
             continue

@@ -162,7 +162,19 @@ def load_external_checkpoint(path, *, family=None, model_config=None, device=Non
             if key in checkpoint:
                 state = checkpoint[key]
                 break
+    saved_config = _config_dict(config)
     config = _config_dict(model_config if model_config is not None else config)
+    saved_settings = saved_config.get("model", saved_config)
+    if not isinstance(saved_settings, Mapping):
+        saved_settings = saved_config
+    settings = config.get("model", config)
+    if not isinstance(settings, Mapping):
+        settings = config
+    constrained = saved_settings.get("charge_constraint", False) or getattr(state, "charge_constraint", False)
+    if constrained:
+        if settings.get("charge_constraint") is False:
+            raise ValueError("Checkpoint enables total-charge constraint; it cannot be silently disabled")
+        settings["charge_constraint"] = True
     detected = detect_family(state, config)
     if family is not None and detected is not None and family != detected:
         raise ValueError(f"Checkpoint is {detected}, not requested family {family}")
@@ -179,6 +191,11 @@ def load_external_checkpoint(path, *, family=None, model_config=None, device=Non
         state = _strip_prefix(state)
         model = _torchmd_model(state, config) if family == "torchmdnet" else _newton_model(state, config)
     model.mlpui_family = family
+    if settings.get("charge_constraint", False):
+        heads = getattr(model, "output_properties", []) if family == "newtonnet" else getattr(model, "output_modules", {})
+        if "charge" not in heads:
+            raise ValueError("Total-charge constraint requires a charge output head")
+        model.charge_constraint = True
     if dtype is not None:
         model.to(dtype=dtype)
     model.eval()

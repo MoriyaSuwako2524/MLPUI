@@ -181,6 +181,7 @@ def create_model(args, prior_model=None, mean=None, std=None):
         std=std,
         derivative=args["derivative"],
         dtype=dtype,
+        charge_constraint=args.get("charge_constraint", False),
     )
 
     return model
@@ -739,8 +740,14 @@ class TorchMD_Net_MultiOutput(nn.Module):
         std=None,
         derivative=False,
         dtype=torch.float32,
+        charge_constraint=False,
     ):
         super().__init__()
+        if not isinstance(charge_constraint, bool):
+            raise ValueError("charge_constraint must be boolean")
+        if charge_constraint and "charge" not in output_modules:
+            raise ValueError("Total-charge constraint requires a charge output head")
+        self.charge_constraint = charge_constraint
         self.representation_model = representation_model.to(dtype=dtype)
         self.output_modules = nn.ModuleDict(output_modules)
         self.prior_model = (
@@ -804,6 +811,9 @@ class TorchMD_Net_MultiOutput(nn.Module):
                 for prior in self.prior_model:
                     y = prior.post_reduce(y, z, pos, batch, box, extra_args)
 
+            if key == "charge" and getattr(self, "charge_constraint", False):
+                from mlpui.models.charge import constrain_charges
+                y = constrain_charges(y, batch, q)
             results[key] = y
 
         if self.derivative and "y" in results:
