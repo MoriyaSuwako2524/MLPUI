@@ -71,7 +71,7 @@ def run(folder):
     def progress(event):
         nonlocal last_write
         now = time.monotonic()
-        if event["phase"] == "epoch_end" or now - last_write > .5:
+        if event["phase"] in {"epoch_end", "test", "validation"} or now - last_write > .5:
             publish(**event)
             last_write = now
         if event["phase"] == "epoch_end":
@@ -101,16 +101,16 @@ def run(folder):
                           checkpoint=settings.get("checkpoint"))
         train = dataset(settings["train"])
         valid = dataset(settings["validation"]) if settings.get("validation") else None
+        test = dataset(settings["test"]) if settings.get("test") else None
         print(f"Training {len(train)} structures on {trainer.config.device}", flush=True)
         try:
-            trainer.fit(train, valid, on_progress=progress,
+            trainer.fit(train, valid, test_data=test, output_dir=folder, on_progress=progress,
                         should_stop=lambda: (folder / "stop").exists())
         except TrainingStopped:
             trainer.save(folder / "model.pt")
             publish(status="stopped", phase="stopped", history=trainer.history,
                     checkpoint=str(folder / "model.pt"))
             return
-        trainer.save(folder / "model.pt")
         publish(status="completed", phase="completed", history=trainer.history,
                 checkpoint=str(folder / "model.pt"))
     except Exception as exc:

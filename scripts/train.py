@@ -38,6 +38,7 @@ def main():
                       trusted_checkpoint=settings.get("trusted_checkpoint", False))
     history = trainer.fit(dataset(settings["train"]),
                           dataset(settings["validation"]) if "validation" in settings else None,
+                          test_data=dataset(settings["test"]) if "test" in settings else None,
                           output_dir=path(settings.get("output_dir", "run")))
     print(json.dumps(history, indent=2))
 

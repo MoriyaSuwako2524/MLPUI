@@ -157,8 +157,20 @@ history. Saved weights can initialize a new task; exact optimizer-state resume
 is not implemented. Closing the browser does not stop training. Keep the Python
 WebUI process running: shutting it down requests a stop, and a crash interrupts
 the worker. Failed/interrupted tasks remain visible with an error message.
-This basic version saves weights on successful completion or a graceful stop;
-it does not save periodic recovery checkpoints.
+Periodic saving is configurable: `save_interval=N` saves every N completed
+epochs, and `max_checkpoints=K` keeps the latest K periodic weight files.
+The UI defaults are N=10 and K=3; N=0 disables periodic saving. Python/YAML
+configs omitted these fields retain the previous default (N=0). `model.pt`
+is still saved on successful completion or a graceful stop and does not count
+toward K. Writes use a temporary file and atomic replacement; older periodic
+files are removed only after the new file is saved successfully.
+
+An optional, separate **test** dataset can be evaluated every `test_interval=M`
+epochs (default 1). Test evaluation runs at M, 2M, 3M, ... without updating model
+weights, and reports per-property MSE in the history, logs, and chart. An ending
+epoch that is not a multiple of M does not trigger an extra test. The existing
+validation dataset is still evaluated every epoch. Test fields use the same
+file mapping/units as training in the UI; Python/YAML can specify their own.
 
 Each task is stored under `runs/web/<id>/` with `config.json`, `status.json`,
 `train.log`, and (after completion or a graceful stop) `model.pt`. Use
@@ -176,6 +188,11 @@ Open the local URL above. If training runs on a separate compute node, the tunne
 must target that node. The basic server binds only to loopback; it is a local,
 single-user tool and does not include public hosting, accounts, or a job queue.
 UMA is not included in this UI.
+
+Periodic files live at `checkpoints/epoch_000010.pt`, etc., and can be downloaded
+from task details even while training is active or after a failed/interrupted
+run. These contain weights, model config, epoch, and history, not optimizer/RNG
+state: use them as initial weights for a new task, not exact training resume.
 
 ## Training from NumPy files
 
@@ -261,6 +278,19 @@ not an exact optimizer/RNG resume checkpoint. `fit` also accepts `on_progress`
 between structures). Cancellation raises `TrainingStopped`; callers may then
 save the current model. This interface does not train
 Hessian/BEC heads or implement early stopping/distributed training.
+
+To enable periodic saves and independent test evaluation in Python:
+
+```python
+config = TrainingConfig(save_interval=10, max_checkpoints=3, test_interval=5)
+trainer = Trainer("newtonnet", model_config, config)
+history = trainer.fit(train, valid, test_data=test, output_dir="runs/experiment")
+```
+
+In YAML, put these three settings under `training` and add a `test` dataset
+section with the same schema as `train`/`validation`. Periodic saving requires
+an `output_dir` in the Python API. Use disjoint structures for all three splits;
+the WebUI rejects overlapping coordinate file paths between splits.
 
 ## Running tests
 

@@ -148,12 +148,22 @@ def test_http_training_and_download(tmp_path):
     threading.Thread(target=server.serve_forever, daemon=True).start()
     base = f"http://127.0.0.1:{server.server_port}"
     try:
-        request = Request(base + "/api/jobs", json.dumps(settings(tmp_path)).encode(),
+        config = settings(tmp_path, epochs=3)
+        config["training"].update(save_interval=1, max_checkpoints=2, test_interval=2)
+        config["test"] = {"directory": str(write_data(tmp_path / "test"))}
+        request = Request(base + "/api/jobs", json.dumps(config).encode(),
                           {"Content-Type": "application/json"})
         with urlopen(request) as response:
             assert response.status == 201
             job = json.load(response)
-        assert wait_job(server.manager, job["id"])["status"] == "completed"
+        state = wait_job(server.manager, job["id"])
+        assert state["status"] == "completed", state
+        assert [r["epoch"] for r in state["history"] if "test" in r] == [2]
+        assert state["checkpoints"] == ["epoch_000003.pt", "epoch_000002.pt"]
+        with urlopen(base + f'/api/jobs/{job["id"]}/checkpoints/epoch_000002.pt') as response:
+            assert response.read()[:2] == b"PK"
+        with pytest.raises(HTTPError):
+            urlopen(base + f'/api/jobs/{job["id"]}/checkpoints/epoch_000001.pt')
         with urlopen(base + f'/api/jobs/{job["id"]}/model') as response:
             assert response.headers["Content-Disposition"].endswith('"model.pt"')
             assert response.read()[:2] == b"PK"
@@ -164,6 +174,15 @@ def test_http_training_and_download(tmp_path):
         server.manager.close()
         server.server_close()
         server.lease.close()
+
+
+def test_test_split_preview_and_overlap(tmp_path):
+    config = settings(tmp_path)
+    config["test"] = {"directory": str(write_data(tmp_path / "test"))}
+    assert inspect_data(normalize(config))["test"]["samples"] == 2
+    config["test"] = dict(config["train"], files={"pos": "pos.npy", "z": "z.npy"})
+    with pytest.raises(ValueError, match="separate"):
+        normalize(config)
 
 
 def test_crashed_session_is_interrupted(tmp_path):

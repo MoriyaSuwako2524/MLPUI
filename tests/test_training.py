@@ -141,3 +141,75 @@ def test_cli(tmp_path):
                             capture_output=True, text=True)
     assert result.returncode == 0, result.stderr
     assert (tmp_path / "run/model.pt").is_file()
+
+
+@pytest.mark.parametrize("kwargs", [
+    {"save_interval": -1}, {"save_interval": 1.5}, {"save_interval": True},
+    {"max_checkpoints": 0}, {"max_checkpoints": False}, {"test_interval": 0},
+    {"test_interval": 2.5},
+])
+def test_invalid_save_and_test_intervals(kwargs):
+    with pytest.raises(ValueError):
+        TrainingConfig(**kwargs)
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize("family", ["newtonnet", "torchmdnet"])
+def test_periodic_saving_retention_and_test_cadence(tmp_path, family):
+    pytest.importorskip("newtonnet.models.newtonnet" if family == "newtonnet" else "torchmdnet.models.model")
+    model_config = (dict(cutoff=3., n_features=8, n_basis=4, n_interactions=1,
+                        output_properties=["energy", "gradient_force"])
+                    if family == "newtonnet" else torchmd_args("tensornet"))
+    data = NpyDataset(write_data(tmp_path / "train"))
+    test = NpyDataset(write_data(tmp_path / "test"))
+    config = TrainingConfig(epochs=5, batch_size=2, dtype=torch.float64,
+                            save_interval=2, max_checkpoints=1, test_interval=2)
+    trainer = Trainer(family, model_config, config)
+    directory = tmp_path / "run"
+    directory.joinpath("checkpoints").mkdir(parents=True)
+    unrelated = directory / "checkpoints/notes.pt"
+    unrelated.write_bytes(b"keep")
+    snapshots = []
+
+    def progress(event):
+        if event["phase"] == "epoch_end":
+            snapshots.append((event["epoch"], sorted(p.name for p in (directory / "checkpoints").glob("epoch_*.pt"))))
+
+    history = trainer.fit(data, test_data=test, output_dir=directory, on_progress=progress)
+    assert snapshots == [(1, []), (2, ["epoch_000002.pt"]), (3, ["epoch_000002.pt"]),
+                         (4, ["epoch_000004.pt"]), (5, ["epoch_000004.pt"])]
+    assert [r["epoch"] for r in history if "test" in r] == [2, 4]
+    assert all(np.isfinite(r["test"]["forces"]) for r in history if "test" in r)
+    assert unrelated.read_bytes() == b"keep"
+    assert torch.load(directory / "model.pt", weights_only=True)["epoch"] == 5
+    saved = torch.load(directory / "checkpoints/epoch_000004.pt", weights_only=True)
+    assert saved["epoch"] == 4 and "test" in saved["history"][-1]
+    atoms = test.atoms(test[0])
+    atoms.calc = CalculatorBuilder.from_checkpoint(directory / "checkpoints/epoch_000004.pt", device="cpu").build()
+    assert np.isfinite(atoms.get_forces()).all()
+    # Test evaluation must not update weights or interfere with subsequent training.
+    baseline = Trainer(family, model_config, TrainingConfig(epochs=5, batch_size=2, dtype=torch.float64))
+    baseline.fit(data)
+    for key, value in trainer.model.state_dict().items():
+        torch.testing.assert_close(value, baseline.model.state_dict()[key])
+
+
+def test_failed_atomic_save_keeps_previous_checkpoint(tmp_path, monkeypatch):
+    trainer = Trainer.__new__(Trainer)
+    trainer.model = torch.nn.Linear(1, 1)
+    trainer.model_config = {}
+    trainer.history = []
+    trainer.config = TrainingConfig(save_interval=1, max_checkpoints=1)
+    trainer._save_periodic(tmp_path, 1)
+    previous = (tmp_path / "checkpoints/epoch_000001.pt").read_bytes()
+
+    def failed_save(value, path):
+        path.write_bytes(b"partial")
+        raise OSError("disk full")
+
+    monkeypatch.setattr(torch, "save", failed_save)
+    with pytest.raises(OSError, match="disk full"):
+        trainer._save_periodic(tmp_path, 2)
+    assert (tmp_path / "checkpoints/epoch_000001.pt").read_bytes() == previous
+    assert not (tmp_path / "checkpoints/epoch_000002.pt").exists()
+    assert not list((tmp_path / "checkpoints").glob("*.tmp"))

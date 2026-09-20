@@ -3,6 +3,10 @@ from dataclasses import dataclass, field
 from pathlib import Path
 import copy
 import math
+import os
+import re
+import time
+from uuid import uuid4
 
 import numpy as np
 import torch
@@ -25,6 +29,9 @@ class TrainingConfig:
     device: str = "cpu"
     dtype: torch.dtype = torch.float32
     seed: int = 0
+    save_interval: int = 0
+    max_checkpoints: int = 3
+    test_interval: int = 1
 
     def __post_init__(self):
         if any(not isinstance(v, int) or isinstance(v, bool) or v < 1 for v in (self.epochs, self.batch_size)):
@@ -36,6 +43,10 @@ class TrainingConfig:
             raise ValueError("loss_weights requires supported targets with finite positive weights")
         if self.dtype not in (torch.float32, torch.float64):
             raise ValueError("Training supports float32 and float64")
+        for name, minimum in (("save_interval", 0), ("max_checkpoints", 1), ("test_interval", 1)):
+            value = getattr(self, name)
+            if not isinstance(value, int) or isinstance(value, bool) or value < minimum:
+                raise ValueError(f"{name} must be an integer >= {minimum}")
 
 
 class Trainer:
@@ -113,17 +124,21 @@ class Trainer:
             raise ValueError("Non-finite training loss")
         return total, losses
 
-    def fit(self, train_data, validation_data=None, *, output_dir=None,
+    def fit(self, train_data, validation_data=None, *, test_data=None, output_dir=None,
             on_progress=None, should_stop=None):
         def check_stop():
             if should_stop is not None and should_stop():
                 raise TrainingStopped("Training stopped by user")
 
         check_stop()
+        if self.config.save_interval and output_dir is None:
+            raise ValueError("Periodic saving requires output_dir")
         train = train_data if isinstance(train_data, (NpyDataset, NpyShards)) else NpyDataset(train_data)
         validation = (validation_data if isinstance(validation_data, (NpyDataset, NpyShards)) else
                       NpyDataset(validation_data)) if validation_data is not None else None
-        for dataset in (train, validation):
+        test = (test_data if isinstance(test_data, (NpyDataset, NpyShards)) else
+                NpyDataset(test_data)) if test_data is not None else None
+        for dataset in (train, validation, test):
             if dataset is not None:
                 fields = dataset.fields if isinstance(dataset, NpyShards) else dataset.arrays.keys()
                 missing = set(self.config.loss_weights) - fields
@@ -153,21 +168,28 @@ class Trainer:
                                  "completed": min(start + len(indices), len(train)),
                                  "total": len(train), "history": self.history})
             row = {"epoch": len(self.history) + 1, "train": {k: v / len(train) for k, v in sums.items()}}
-            if validation is not None:
+            evaluations = [("validation", validation)]
+            if row["epoch"] % self.config.test_interval == 0:
+                evaluations.append(("test", test))
+            for split, evaluation in evaluations:
+                if evaluation is None:
+                    continue
                 if on_progress is not None:
-                    on_progress({"phase": "validation", "epoch": len(self.history) + 1,
+                    on_progress({"phase": split, "epoch": len(self.history) + 1,
                                  "completed": len(train), "total": len(train), "history": self.history})
                 self.model.eval()
                 sums = {key: 0.0 for key in self.config.loss_weights}
                 # Derivative heads still need autograd during validation.
                 with torch.enable_grad():
-                    for sample in validation:
+                    for sample in evaluation:
                         check_stop()
                         _, parts = self._loss(sample)
                         for key, value in parts.items():
                             sums[key] += value.detach().item()
-                row["validation"] = {k: v / len(validation) for k, v in sums.items()}
+                row[split] = {k: v / len(evaluation) for k, v in sums.items()}
             self.history.append(row)
+            if self.config.save_interval and row["epoch"] % self.config.save_interval == 0:
+                self._save_periodic(output_dir, row["epoch"])
             if on_progress is not None:
                 on_progress({"phase": "epoch_end", "epoch": len(self.history),
                              "completed": len(train), "total": len(train),
@@ -177,11 +199,33 @@ class Trainer:
             self.save(Path(output_dir) / "model.pt")
         return self.history
 
+    def _save_periodic(self, output_dir, epoch):
+        directory = Path(output_dir) / "checkpoints"
+        self.save(directory / f"epoch_{epoch:06d}.pt")
+        # Only prune this interface's exact checkpoint names, after saving succeeds.
+        saved = sorted((p for p in directory.iterdir()
+                        if p.is_file() and re.fullmatch(r"epoch_[0-9]{6,}\.pt", p.name)),
+                       key=lambda p: int(p.stem.split("_")[1]))
+        for path in saved[:-self.config.max_checkpoints]:
+            path.unlink()
+
     def save(self, path):
         """Export portable weights/config for CalculatorBuilder (not optimizer resume)."""
         path = Path(path)
         path.parent.mkdir(parents=True, exist_ok=True)
-        torch.save({"model_config": self.model_config,
+        temporary = path.with_name(path.name + "." + uuid4().hex + ".tmp")
+        try:
+            torch.save({"model_config": self.model_config,
                     "state_dict": {k: v.detach().cpu() for k, v in self.model.state_dict().items()},
-                    "history": self.history}, path)
+                    "history": self.history, "epoch": len(self.history)}, temporary)
+            for attempt in range(50):
+                try:
+                    os.replace(temporary, path)
+                    break
+                except PermissionError:
+                    if attempt == 49:
+                        raise
+                    time.sleep(.02)
+        finally:
+            temporary.unlink(missing_ok=True)
         return path

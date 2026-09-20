@@ -47,6 +47,11 @@ class JobManager:
                     state.update(status="failed", error=f"Worker exited with code {process.returncode}")
                     write_json(folder / "status.json", state)
             state["stop_requested"] = (folder / "stop").exists()
+            directory = folder / "checkpoints"
+            state["checkpoints"] = sorted(
+                [p.name for p in directory.glob("epoch_*.pt")
+                 if p.is_file() and re.fullmatch(r"epoch_[0-9]{6,}\.pt", p.name)],
+                key=lambda name: int(name[6:-3]), reverse=True)
             return state
 
     def list(self):
@@ -164,7 +169,7 @@ def make_server(root, port=8675):
                     import torch
                     return self.respond({"models": presets(), "cuda": torch.cuda.is_available(),
                                          "root": str(manager.root)})
-                match = re.fullmatch(r"/api/jobs/([a-f0-9]{32})(?:/(log|config|model))?", path)
+                match = re.fullmatch(r"/api/jobs/([a-f0-9]{32})(?:/(log|config|model|checkpoints/epoch_[0-9]{6,}\.pt))?", path)
                 if match:
                     job_id, action = match.groups()
                     folder = manager.folder(job_id)
@@ -178,16 +183,21 @@ def make_server(root, port=8675):
                         return self.respond({"text": text})
                     if action == "config":
                         return self.respond(read_json(folder / "config.json"))
-                    if action == "model":
-                        if manager.get(job_id)["status"] not in {"completed", "stopped"}:
-                            raise ValueError("Model is not ready")
-                        file = folder / "model.pt"
-                        self.send_response(200)
-                        self.send_header("Content-Type", "application/octet-stream")
-                        self.send_header("Content-Disposition", 'attachment; filename="model.pt"')
-                        self.send_header("Content-Length", str(file.stat().st_size))
-                        self.end_headers()
+                    if action == "model" or (action and action.startswith("checkpoints/")):
+                        if action == "model":
+                            if manager.get(job_id)["status"] not in {"completed", "stopped"}:
+                                raise ValueError("Model is not ready")
+                            file = folder / "model.pt"
+                        else:
+                            file = folder / action
+                        # Open before sending headers; retention can remove an older
+                        # checkpoint while a user selects its download link.
                         with file.open("rb") as stream:
+                            self.send_response(200)
+                            self.send_header("Content-Type", "application/octet-stream")
+                            self.send_header("Content-Disposition", f'attachment; filename="{file.name}"')
+                            self.send_header("Content-Length", str(os.fstat(stream.fileno()).st_size))
+                            self.end_headers()
                             while chunk := stream.read(1024 * 1024):
                                 self.wfile.write(chunk)
                         return

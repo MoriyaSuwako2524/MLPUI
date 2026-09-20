@@ -32,7 +32,7 @@ def normalize(payload):
     value = copy.deepcopy(payload)
     if not isinstance(value, dict):
         raise ValueError("Expected a configuration object")
-    allowed = {"name", "family", "model_config", "training", "train", "validation", "checkpoint"}
+    allowed = {"name", "family", "model_config", "training", "train", "validation", "test", "checkpoint"}
     if value.keys() - allowed:
         raise ValueError("Unsupported configuration fields")
     value["name"] = str(value.get("name", "Training run")).strip()
@@ -48,9 +48,9 @@ def normalize(payload):
         raise ValueError("Precision must be float32 or float64")
     TrainingConfig(**{**options, "dtype": getattr(torch, dtype)})
     value["training"] = options
-    for key in ("train", "validation"):
+    for key in ("train", "validation", "test"):
         spec = value.get(key)
-        if key == "validation" and not spec:
+        if key != "train" and not spec:
             value.pop(key, None)
             continue
         if not isinstance(spec, dict) or not spec.get("directory"):
@@ -74,19 +74,23 @@ def normalize(payload):
         value["checkpoint"] = str(checkpoint)
     else:
         value.pop("checkpoint", None)
-    if value.get("validation"):
-        train, valid = value["train"], value["validation"]
-        if train["directory"] == valid["directory"] and train.get("files") == valid.get("files"):
-            if (not train.get("shards") or not valid.get("shards") or
-                    set(train["shards"]) & set(valid["shards"])):
-                raise ValueError("Training and validation data must be separate")
+    def coordinate_files(spec):
+        template = spec.get("files", {}).get("pos", "pos.npy")
+        return {(Path(spec["directory"]) / template.format(shard=s)).resolve()
+                for s in spec.get("shards", [""])}
+
+    splits = [key for key in ("train", "validation", "test") if key in value]
+    for i, first in enumerate(splits):
+        for second in splits[i + 1:]:
+            if coordinate_files(value[first]) & coordinate_files(value[second]):
+                raise ValueError(f"{first} and {second} data must be separate")
     return value
 
 
 def inspect_data(settings):
     result = {}
     labels = set(settings["training"].get("loss_weights", {"energy": 1, "forces": 1}))
-    for key in ("train", "validation"):
+    for key in ("train", "validation", "test"):
         if key not in settings:
             continue
         data = dataset(settings[key])

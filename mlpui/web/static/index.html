@@ -33,6 +33,9 @@
         <label>训练分组<input id="shards" value="w00, w01" placeholder="w00, w01"><small>逗号分隔；没有分组时留空。</small></label>
         <label>验证分组 <span class="optional">可选</span><input id="validation-shards" placeholder="例如 w02"></label>
         <label class="wide">验证数据目录 <span class="optional">可选</span><input id="validation-directory" placeholder="分组验证可留空，使用同一数据目录"></label>
+        <label>测试分组 <span class="optional">可选</span><input id="test-shards" placeholder="例如 w03, w04"></label>
+        <label>测试数据目录 <span class="optional">可选</span><input id="test-directory" placeholder="分组测试可留空，使用同一数据目录"></label>
+        <p class="hint wide">测试集采用相同文件映射和单位，须与训练、验证数据分开；仅评估，不更新权重。</p>
       </div><details id="file-details"><summary>文件映射与单位</summary><p class="hint">{shard} 会替换成分组名。公共原子类型文件无需占位符。</p><div class="grid two">
         <label>原子类型<input id="file-z" value="full_qm_type.npy" required></label><label>坐标<input id="file-pos" value="qm_coord_{shard}.npy" required></label>
         <label>能量<input id="file-energy" value="energy_{shard}.npy"></label><label>力 / 梯度<input id="file-forces" value="qm_grad_{shard}.npy"></label>
@@ -51,6 +54,9 @@
         <label>随机种子<input id="seed" type="number" value="0" min="0" step="1" required></label>
         <label>能量损失权重<input id="weight-energy" type="number" value="1" min="0" step="any" required></label>
         <label>力损失权重<input id="weight-forces" type="number" value="1" min="0" step="any" required></label>
+        <label>保存间隔 N（epoch）<input id="save-interval" type="number" value="10" min="0" step="1" required><small>0 表示关闭定期保存。</small></label>
+        <label>最多保留 checkpoint 数量<input id="max-checkpoints" type="number" value="3" min="1" step="1" required><small>保留最新的文件；不含最终 model.pt。</small></label>
+        <label>测试间隔 M（epoch）<input id="test-interval" type="number" value="1" min="1" step="1" required><small>填写测试集后，在 M 的倍数 epoch 评估。</small></label>
       </div><p class="hint">权重设为 0 可关闭该项。每个 batch 累积多个结构的梯度。</p></div>
       </div><div class="form-side"><div class="panel summary"><div class="eyebrow">READY WHEN YOU ARE</div><h2>开始一次实验</h2><p>数据、参数和训练记录会保存在独立任务目录中。</p><ul><li>能量与力的联合训练</li><li>实时进度、损失与日志</li><li>可停止并保存当前权重</li></ul><button class="primary" id="start" type="submit">开始训练 <span>→</span></button><small>训练在后台运行，关闭浏览器不影响任务。</small></div></div></div>
     </form>
@@ -58,8 +64,9 @@
   <section id="detail-view" hidden>
     <div class="page-title"><div><a href="#jobs" class="back">← 全部任务</a><h1 id="detail-name"></h1><p id="detail-meta"></p></div><button id="stop" class="danger">停止训练</button></div>
     <div class="panel progress-panel"><div><span id="detail-status" class="badge"></span><span id="progress-label"></span></div><progress id="progress" value="0" max="100"></progress><p id="detail-error" role="alert" hidden></p></div>
-    <div class="panel chart-panel"><div class="panel-heading"><h2>训练损失</h2><select id="metric" aria-label="损失类型"><option value="energy">Energy MSE</option><option value="forces">Forces MSE</option></select></div><div id="chart"></div><div class="legend"><span><i class="line purple"></i>训练集</span><span><i class="line green"></i>验证集</span><span class="muted">每个 epoch 更新 · 线性坐标</span></div></div>
+    <div class="panel chart-panel"><div class="panel-heading"><h2>训练损失</h2><select id="metric" aria-label="损失类型"><option value="energy">Energy MSE</option><option value="forces">Forces MSE</option></select></div><div id="chart"></div><div class="legend"><span><i class="line purple"></i>训练集</span><span><i class="line green"></i>验证集</span><span><i class="line" style="background:#f4bb75"></i>测试集</span><span class="muted">按实际评估 epoch 显示 · 线性坐标</span></div><p id="test-result" class="footnote" style="padding:0 23px 18px"></p></div>
     <div class="panel"><div class="panel-heading"><h2>输出文件</h2><a id="download-model" class="button" hidden>下载模型 ↓</a></div><div class="output"><span class="muted">任务目录</span><code id="output-path"></code><a id="download-config" target="_blank" rel="noopener">查看配置 ↗</a></div></div>
+    <div class="panel"><div class="panel-heading"><h2>定期保存的 Checkpoints</h2><span class="muted">最新在前</span></div><div id="checkpoint-list" class="output"></div></div>
     <div class="panel"><div class="panel-heading"><h2>运行日志</h2><span class="muted">最近 32 KB</span></div><pre id="log">等待训练进程输出…</pre></div>
   </section>
 </main>

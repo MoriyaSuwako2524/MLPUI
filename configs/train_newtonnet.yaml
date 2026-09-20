@@ -14,6 +14,9 @@ training:
   dtype: float64
   device: cpu
   loss_weights: {energy: 1.0, forces: 1.0}
+  save_interval: 10
+  max_checkpoints: 3
+  test_interval: 5
 train:
   directory: /scratch/moriya/codex/chorismate_mutase/calc1/npys
   shards: [w00, w01]
@@ -29,6 +32,16 @@ train:
 validation:
   directory: /scratch/moriya/codex/chorismate_mutase/calc1/npys
   shards: [w02]
+  files:
+    z: full_qm_type.npy
+    pos: qm_coord_{shard}.npy
+    forces: qm_grad_{shard}.npy
+    energy: energy_{shard}.npy
+  gradients: true
+# Optional separate test set, evaluated at epochs 5, 10, ...
+test:
+  directory: /scratch/moriya/codex/chorismate_mutase/calc1/npys
+  shards: [w03]
   files:
     z: full_qm_type.npy
     pos: qm_coord_{shard}.npy
