@@ -54,6 +54,7 @@ class JobManager:
                     state.update(status="failed", error=f"Worker exited with code {process.returncode}")
                     write_json(folder / "status.json", state)
             state["stop_requested"] = (folder / "stop").exists()
+            state["best_checkpoint"] = (folder / "best.pt").is_file()
             directory = folder / "checkpoints"
             state["checkpoints"] = sorted(
                 [p.name for p in directory.glob("epoch_*.pt")
@@ -241,7 +242,7 @@ def make_server(root, port=8675, host="127.0.0.1"):
                     import torch
                     return self.respond({"models": presets(), "cuda": torch.cuda.is_available(),
                                          "root": str(manager.root)})
-                match = re.fullmatch(r"/api/jobs/([a-f0-9]{32})(?:/(log|config|evaluation|model|plots/(?:energy|forces|charges|dipole|stress)\.(?:png|svg)|checkpoints/epoch_[0-9]{6,}\.pt))?", path)
+                match = re.fullmatch(r"/api/jobs/([a-f0-9]{32})(?:/(log|config|evaluation|model|best|plots/(?:energy|forces|charges|dipole|stress)\.(?:png|svg)|checkpoints/epoch_[0-9]{6,}\.pt))?", path)
                 if match:
                     job_id, action = match.groups()
                     folder = manager.folder(job_id)
@@ -267,11 +268,13 @@ def make_server(root, port=8675, host="127.0.0.1"):
                         self.end_headers()
                         self.wfile.write(content)
                         return
-                    if action == "model" or (action and action.startswith("checkpoints/")):
+                    if action in ("model", "best") or (action and action.startswith("checkpoints/")):
                         if action == "model":
                             if manager.get(job_id)["status"] not in {"completed", "stopped"}:
                                 raise ValueError("Model is not ready")
                             file = folder / "model.pt"
+                        elif action == "best":
+                            file = folder / "best.pt"
                         else:
                             file = folder / action
                         # Open before sending headers; retention can remove an older

@@ -50,6 +50,9 @@ function payload() {
   const result={name:text('name'),family:text('family'),model_config:model,train,
     training:{epochs:number('epochs'),batch_size:number('batch-size'),learning_rate:number('learning-rate'),dtype:text('dtype'),device:text('device'),seed:number('seed'),loss_weights:weights,save_interval:number('save-interval'),max_checkpoints:number('max-checkpoints'),test_interval:number('test-interval')}};
   if(text('checkpoint')) result.checkpoint=text('checkpoint');
+  if($('early-stopping').checked) Object.assign(result.training,{early_stopping:true,
+    early_stopping_monitor:text('early-monitor'),early_stopping_patience:number('early-patience'),
+    early_stopping_min_delta:number('early-min-delta')});
   if(text('validation-directory') || groups('validation-shards').length) {
     result.validation={...train,directory:text('validation-directory')||train.directory};
     delete result.validation.shards;
@@ -113,6 +116,12 @@ function renderDetail(job) {
   $('stop').textContent=job.status==='queued'?'取消排队':job.stop_requested?'正在停止…':'停止任务';
   if(job.status==='queued') $('progress-label').textContent=`排队位置 ${job.queue_position||'—'} · ${job.queue_reason||'等待调度'}`;
   $('detail-meta').textContent+=` · ${job.assigned_device||job.requested_device||'cpu'}`;
+  const early=job.early_stopping;
+  $('early-stopping-result').hidden=!early;
+  $('early-stopping-result').textContent=early?`${early.stopped?'已触发早停':'早停监控'} · 验证集 ${early.monitor} · 最佳 epoch ${early.best_epoch??'—'} · 最佳值 ${early.best_value==null?'—':early.best_value.toExponential(5)} · 无足够改善 ${early.bad_epochs}/${early.patience} 轮`:'';
+  if(job.stop_reason==='early_stopping'){$('detail-status').textContent='已早停';$('progress').value=100;$('progress-label').textContent=`${epoch} / ${job.epochs} epochs · 验证集未继续改善`;}
+  $('download-best').hidden=!job.best_checkpoint;
+  $('download-best').href=`/api/jobs/${job.id}/best`;
   $('output-path').textContent=job.directory;
   $('download-model').hidden=!job.checkpoint || !['completed','stopped'].includes(job.status);
   $('download-model').href=`/api/jobs/${job.id}/model`;
@@ -180,12 +189,20 @@ function updateTaskType() {
   }
   for(const id of ['eval-energy','eval-forces','eval-charges']) $(id).closest('label').hidden=!evaluating;
   for(const split of ['validation','test']) $('managed-'+split).closest('label').hidden=evaluating;
+  for(const id of ['early-stopping','early-monitor','early-patience','early-min-delta']) $(id).closest('label').hidden=evaluating;
+  updateEarlyStopping();
   $('weight-charges').disabled=evaluating||!$('train-charges').checked;
   $('new-view').querySelector('h1').textContent=evaluating?'创建评估任务':'创建训练任务';
   $('new-view').querySelector('.page-title p').textContent=evaluating?'选择已有模型和带标签的 npy 数据，计算误差。模型结构配置须与原模型一致。':'选择模型，连接 NumPy 数据，然后开始训练。';
   $('preview-result').textContent='检查文件、数组形状与标签。';
 }
 $('task-type').addEventListener('change',updateTaskType);
+function updateEarlyStopping(){
+  const evaluating=text('task-type')==='evaluation';
+  $('early-stopping').disabled=evaluating;
+  for(const id of ['early-monitor','early-patience','early-min-delta']) $(id).disabled=evaluating||!$('early-stopping').checked;
+}
+$('early-stopping').addEventListener('change',updateEarlyStopping);
 $('train-charges').addEventListener('change',()=>{$('weight-charges').disabled=!$('train-charges').checked;});
 $('layout').addEventListener('change',()=>{
   const standard=text('layout')==='standard';

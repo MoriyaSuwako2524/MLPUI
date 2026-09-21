@@ -56,8 +56,22 @@ class TrainingConfig:
     save_interval: int = 0
     max_checkpoints: int = 3
     test_interval: int = 1
+    early_stopping: bool = False
+    early_stopping_monitor: str = "loss"
+    early_stopping_patience: int = 10
+    early_stopping_min_delta: float = 0.0
 
     def __post_init__(self):
+        if not isinstance(self.early_stopping, bool):
+            raise ValueError("early_stopping must be boolean")
+        if (isinstance(self.early_stopping_patience, bool) or not isinstance(self.early_stopping_patience, int)
+                or self.early_stopping_patience < 1):
+            raise ValueError("early_stopping_patience must be a positive integer")
+        if (isinstance(self.early_stopping_min_delta, bool) or not isinstance(self.early_stopping_min_delta, (float, int))
+                or not math.isfinite(self.early_stopping_min_delta) or self.early_stopping_min_delta < 0):
+            raise ValueError("early_stopping_min_delta must be finite and nonnegative")
+        if self.early_stopping_monitor != "loss" and self.early_stopping_monitor not in self.loss_weights:
+            raise ValueError("Early stopping monitor must be loss or an enabled target")
         if any(not isinstance(v, int) or isinstance(v, bool) or v < 1 for v in (self.epochs, self.batch_size)):
             raise ValueError("epochs and batch_size must be positive integers")
         if not math.isfinite(self.learning_rate) or self.learning_rate <= 0:
@@ -209,6 +223,15 @@ class Trainer:
                 raise TrainingStopped("Training stopped by user")
 
         check_stop()
+        self.early_stopping = None
+        if self.config.early_stopping:
+            if validation_data is None:
+                raise ValueError("Early stopping requires a validation dataset")
+            if output_dir is None:
+                raise ValueError("Early stopping requires output_dir to save best.pt")
+            self.early_stopping = dict(monitor=self.config.early_stopping_monitor,
+                patience=self.config.early_stopping_patience, min_delta=self.config.early_stopping_min_delta,
+                best_value=None, best_epoch=None, reference_value=None, bad_epochs=0, stopped=False)
         if self.config.save_interval and output_dir is None:
             raise ValueError("Periodic saving requires output_dir")
         train = train_data if isinstance(train_data, (NpyDataset, NpyShards)) else NpyDataset(train_data)
@@ -266,12 +289,31 @@ class Trainer:
                             sums[key] += value.detach().item()
                 row[split] = {k: v / len(evaluation) for k, v in sums.items()}
             self.history.append(row)
+            if self.early_stopping is not None:
+                early = self.early_stopping
+                values = row["validation"]
+                metric = (sum(self.config.loss_weights[k] * v for k, v in values.items())
+                          if early["monitor"] == "loss" else values[early["monitor"]])
+                if not math.isfinite(metric):
+                    raise ValueError("Non-finite early stopping metric")
+                # Patience uses significant improvements; best.pt always tracks
+                # the actual lowest validation value, including smaller changes.
+                if early["reference_value"] is None or metric < early["reference_value"] - early["min_delta"]:
+                    early.update(reference_value=metric, bad_epochs=0)
+                else:
+                    early["bad_epochs"] += 1
+                early["stopped"] = early["bad_epochs"] >= early["patience"]
+                if early["best_value"] is None or metric < early["best_value"]:
+                    early.update(best_value=metric, best_epoch=row["epoch"])
+                    self.save(Path(output_dir) / "best.pt")
             if self.config.save_interval and row["epoch"] % self.config.save_interval == 0:
                 self._save_periodic(output_dir, row["epoch"])
             if on_progress is not None:
                 on_progress({"phase": "epoch_end", "epoch": len(self.history),
                              "completed": len(train), "total": len(train),
-                             "history": self.history})
+                             "history": self.history, "early_stopping": copy.deepcopy(self.early_stopping)})
+            if self.early_stopping is not None and self.early_stopping["stopped"]:
+                break
         self.model.eval()
         if output_dir is not None:
             self.save(Path(output_dir) / "model.pt")
@@ -293,7 +335,7 @@ class Trainer:
         path.parent.mkdir(parents=True, exist_ok=True)
         temporary = path.with_name(path.name + "." + uuid4().hex + ".tmp")
         try:
-            torch.save({"model_config": self.model_config,
+            torch.save({"model_config": self.model_config, "early_stopping": getattr(self, "early_stopping", None),
                     "state_dict": {k: v.detach().cpu() for k, v in self.model.state_dict().items()},
                     "history": self.history, "epoch": len(self.history)}, temporary)
             for attempt in range(50):

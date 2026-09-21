@@ -134,6 +134,8 @@ def run(folder):
                     checkpoint=str(folder / "model.pt"))
             return
         publish(status="completed", phase="completed", history=trainer.history,
+                early_stopping=trainer.early_stopping,
+                stop_reason="early_stopping" if trainer.early_stopping and trainer.early_stopping["stopped"] else "epochs_completed",
                 checkpoint=str(folder / "model.pt"))
     except Exception as exc:
         traceback.print_exc()

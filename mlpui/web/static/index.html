@@ -101,6 +101,10 @@
         <label class="check"><input id="train-charges" type="checkbox">训练原子电荷预测<small>默认关闭；自动添加电荷输出头。请填写原子电荷 npy 标签；已有模型须包含匹配的电荷权重。</small></label>
         <label>原子电荷损失权重<input id="weight-charges" type="number" value="1" min="0.000000000001" step="any" required><small>仅勾选电荷预测时使用。</small></label>
         <label>Epochs<input id="epochs" type="number" value="10" min="1" step="1" required></label>
+        <label class="check"><input id="early-stopping" type="checkbox">启用早停<small>根据验证集判断；必须提供独立验证集。</small></label>
+        <label>早停监控指标<select id="early-monitor"><option value="loss">验证集加权总损失</option><option value="energy">验证集 Energy MSE</option><option value="forces">验证集 Forces MSE</option><option value="charges">验证集 Charges MSE</option></select></label>
+        <label>耐心轮数 Patience<input id="early-patience" type="number" value="10" min="1" step="1"><small>连续 N 轮无足够改善时停止。</small></label>
+        <label>最小改善幅度 Min delta<input id="early-min-delta" type="number" value="0" min="0" step="any"><small>绝对下降幅度；等于阈值不算改善。best.pt 保存实际最低指标的权重，model.pt 保留停止时权重。</small></label>
         <label>Batch size<input id="batch-size" type="number" value="4" min="1" step="1" required></label>
         <label>学习率<input id="learning-rate" type="number" value="0.001" min="0.000000000001" step="any" required></label>
         <label>运行设备<select id="device"><option value="cpu">CPU</option><option value="cuda">GPU · CUDA</option></select></label>
@@ -117,10 +121,10 @@
   </section>
   <section id="detail-view" hidden>
     <div class="page-title"><div><a href="#jobs" class="back">← 全部任务</a><h1 id="detail-name"></h1><p id="detail-meta"></p></div><button id="stop" class="danger">停止训练</button></div>
-    <div class="panel progress-panel"><div><span id="detail-status" class="badge"></span><span id="progress-label"></span></div><progress id="progress" value="0" max="100"></progress><p id="detail-error" role="alert" hidden></p></div>
+    <div class="panel progress-panel"><div><span id="detail-status" class="badge"></span><span id="progress-label"></span></div><progress id="progress" value="0" max="100"></progress><p id="early-stopping-result" class="hint" hidden></p><p id="detail-error" role="alert" hidden></p></div>
     <div id="evaluation-panel" class="panel" hidden><div class="panel-heading"><h2>评估结果</h2><a id="download-evaluation" target="_blank" rel="noopener">查看结果 JSON ↗</a></div><div id="evaluation-metrics" class="output"></div><div id="evaluation-plots" class="evaluation-plots"></div><p class="footnote">能量按结构统计；力按全部原子的笛卡尔分量统计；电荷按原子统计。单位沿用数据换算设置，不拟合能量偏移。</p></div>
     <div class="panel chart-panel"><div class="panel-heading"><h2>训练损失</h2><select id="metric" aria-label="损失类型"><option value="energy">Energy MSE</option><option value="forces">Forces MSE</option><option value="charges">Charges MSE</option></select></div><div id="chart"></div><div class="legend"><span><i class="line purple"></i>训练集</span><span><i class="line green"></i>验证集</span><span><i class="line" style="background:#f4bb75"></i>测试集</span><span class="muted">按实际评估 epoch 显示 · 线性坐标</span></div><p id="test-result" class="footnote" style="padding:0 23px 18px"></p></div>
-    <div class="panel"><div class="panel-heading"><h2>输出文件</h2><a id="download-model" class="button" hidden>下载模型 ↓</a></div><div class="output"><span class="muted">任务目录</span><code id="output-path"></code><a id="download-config" target="_blank" rel="noopener">查看配置 ↗</a></div></div>
+    <div class="panel"><div class="panel-heading"><h2>输出文件</h2><a id="download-model" class="button" hidden>下载模型 ↓</a></div><div class="output"><span class="muted">任务目录</span><code id="output-path"></code><a id="download-best" class="button" hidden>下载最佳模型 best.pt ↓</a><a id="download-config" target="_blank" rel="noopener">查看配置 ↗</a></div></div>
     <div class="panel"><div class="panel-heading"><h2>定期保存的 Checkpoints</h2><span class="muted">最新在前</span></div><div id="checkpoint-list" class="output"></div></div>
     <div class="panel"><div class="panel-heading"><h2>运行日志</h2><span class="muted">最近 32 KB</span></div><pre id="log">等待训练进程输出…</pre></div>
   </section>

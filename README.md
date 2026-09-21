@@ -444,6 +444,30 @@ missing outputs, repeated patching, and the safe-loading default. Integration
 tests skip if optional backends are not installed; check the reported skip count.
 
 
+### Optional early stopping
+
+Optional early stopping is available in training tasks. Enable **启用早停** and
+provide an independent validation dataset. Defaults: monitor `loss` (the weighted
+sum of validation MSEs), patience 10 validation epochs, absolute min_delta 0.
+An individual enabled target (`energy`, `forces`, `charges`, etc.) may be monitored
+instead. Lower is better; an improvement must exceed min_delta relative to the
+last significant improvement. The first validation epoch establishes the baseline;
+patience consecutive epochs without sufficient improvement end training normally.
+Test-set metrics never influence this decision.
+
+When enabled, `best.pt` tracks the actual lowest validation metric, even if an
+improvement is smaller than min_delta. `model.pt` still contains the final weights;
+there is no automatic weight restoration. The UI reports the best epoch, metric,
+patience counter and early-stop reason, and provides a separate best-model download.
+Early completion releases its queue slot after the worker exits. Periodic checkpoint
+retention does not remove best.pt. Early stopping is off by default.
+
+Python/YAML configuration uses `early_stopping`, `early_stopping_monitor`,
+`early_stopping_patience`, and `early_stopping_min_delta` in `TrainingConfig` / the
+`training` object. `fit` requires both validation data and `output_dir` when enabled.
+Fine-tuning from a checkpoint starts a new early-stopping history; optimizer and
+patience state are not resumed.
+
 ### Task queue and GPU scheduling
 
 Each visible GPU runs at most one MLPUI task. Queued GPU tasks start in submission

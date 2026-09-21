@@ -96,6 +96,8 @@ def normalize(payload):
         for second in splits[i + 1:]:
             if coordinate_files(value[first]) & coordinate_files(value[second]):
                 raise ValueError(f"{first} and {second} data must be separate")
+    if options.get("early_stopping", False) and (evaluating or not value.get("validation")):
+        raise ValueError("早停只适用于训练，并且必须提供独立验证集")
     return value
 
 
