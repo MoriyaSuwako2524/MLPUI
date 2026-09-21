@@ -15,8 +15,8 @@
   <div id="notice" role="alert" hidden></div>
   <section id="jobs-view">
     <div class="page-title"><div><div class="eyebrow">YOUR EXPERIMENTS</div><h1>训练与评估</h1><p>从分子数据到你的下一个势能模型。</p></div><a class="button primary" href="#new">＋ 新建任务</a></div>
-    <div class="stats"><div><span>全部任务</span><strong id="count-all">0</strong></div><div><span><i class="dot purple"></i> 运行中</span><strong id="count-active">0</strong></div><div><span><i class="dot"></i> 已完成</span><strong id="count-done">0</strong></div></div>
-    <div class="panel"><div class="panel-heading"><h2>最近任务</h2><span class="muted">自动刷新 · 每次运行一个任务</span></div><div id="job-list"></div></div>
+    <div class="stats"><div><span>全部任务</span><strong id="count-all">0</strong></div><div><span><i class="dot purple"></i> 运行中</span><strong id="count-active">0</strong></div><div><span>排队中</span><strong id="count-queued">0</strong></div><div><span><i class="dot"></i> 已完成</span><strong id="count-done">0</strong></div></div>
+    <div class="panel"><div class="panel-heading"><h2>最近任务</h2><span class="muted">自动调度 · 空闲 GPU 并行，忙时排队</span></div><div id="job-list"></div></div>
     <p class="footnote" id="runs-root"></p>
   </section>
   <section id="datasets-view" hidden>
@@ -112,7 +112,7 @@
         <label>最多保留 checkpoint 数量<input id="max-checkpoints" type="number" value="3" min="1" step="1" required><small>保留最新的文件；不含最终 model.pt。</small></label>
         <label>测试间隔 M（epoch）<input id="test-interval" type="number" value="1" min="1" step="1" required><small>填写测试集后，在 M 的倍数 epoch 评估。</small></label>
       </div><p id="training-hint" class="hint">能量或力权重设为 0 可关闭该项；电荷由勾选框启用。每个 batch 累积多个结构的梯度。</p></div>
-      </div><div class="form-side"><div class="panel summary"><div class="eyebrow">READY WHEN YOU ARE</div><h2>开始一次实验</h2><p>数据配置、参数和运行记录会保存在独立任务目录中。</p><ul><li>训练模型或评估已有模型</li><li>实时进度、指标与日志</li><li>任务结果独立保存</li></ul><button class="primary" id="start" type="submit">开始训练 <span>→</span></button><small>任务在后台运行，关闭浏览器不影响任务。</small></div></div></div>
+      </div><div class="form-side"><div class="panel summary"><div class="eyebrow">READY WHEN YOU ARE</div><h2>开始一次实验</h2><p>数据配置、参数和运行记录会保存在独立任务目录中。</p><ul><li>训练模型或评估已有模型</li><li>实时进度、指标与日志</li><li>任务结果独立保存</li></ul><button class="primary" id="start" type="submit">开始训练 <span>→</span></button><small>任务进入后台队列，空闲 GPU 自动接续；关闭浏览器不影响队列。</small></div></div></div>
     </form>
   </section>
   <section id="detail-view" hidden>

@@ -257,7 +257,8 @@ ssh -N -L 8675:127.0.0.1:8675 pete
 
 Open the local URL above. If training runs on a separate compute node, the tunnel
 must target that node. The server defaults to loopback; it is a
-single-user tool and does not include public hosting, accounts, or a job queue.
+single-user tool and does not include public hosting or accounts. Training and
+evaluation submissions enter a persistent local queue.
 On a trusted cluster network, `--host 0.0.0.0` (or `MLPUI_HOST=0.0.0.0`
 in the Slurm script) permits forwarding through the login node directly to the
 compute node. This exposes an unauthenticated service to reachable cluster peers;
@@ -441,3 +442,28 @@ agreement, finite-difference forces, charges/dipoles/stress, periodic cells,
 and legacy TorchMD tuple outputs. Unit tests additionally cover conversions,
 missing outputs, repeated patching, and the safe-loading default. Integration
 tests skip if optional backends are not installed; check the reported skip count.
+
+
+### Task queue and GPU scheduling
+
+Each visible GPU runs at most one MLPUI task. Queued GPU tasks start in submission
+order as compatible devices become free; multiple visible GPUs allow independent
+jobs to run concurrently. CPU jobs use a separate serial queue. GPU requests wait
+for a GPU and never silently fall back to CPU. The UI shows queued/running states,
+assigned logical devices and a cancel-queue action. Running jobs keep cooperative
+stop behavior. Queued jobs survive WebUI restart; previously running jobs become
+interrupted rather than being silently retrained.
+
+Scheduling respects the server's CUDA visibility, including Slurm's allocation.
+For two concurrent GPU jobs, request two GPUs in the existing Slurm script, e.g.
+`#SBATCH --gres=gpu:2`; with one allocated GPU, GPU jobs run serially. This is a
+queue within the current allocation, not an additional sbatch submission service.
+Each task uses one GPU; it is not distributed training of a single model.
+
+A GPU is eligible when at least 90% of its memory is free and, when nvidia-smi UUID
+process information is available, no other compute process is reported (excluding
+the WebUI process itself). If process information is unavailable, the memory check
+is the fallback; eligibility is a heuristic, not a reservation against external
+programs or a guarantee that a model fits. MLPUI reserves a slot until its worker
+actually exits. Only currently visible devices are candidates. Keep WebUI and the
+Slurm allocation running to advance the queue; closing just the browser is safe.

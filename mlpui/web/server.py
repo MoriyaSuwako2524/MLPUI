@@ -16,7 +16,8 @@ from mlpui.web.config import normalize, inspect_data, presets
 from mlpui.web.worker import write_json, read_json
 from mlpui.web.datasets import DatasetManager
 
-ACTIVE = {"starting", "running", "stopping"}
+RUNNING = {"starting", "running", "stopping"}
+ACTIVE = RUNNING | {"queued"}
 
 
 class JobManager:
@@ -25,6 +26,11 @@ class JobManager:
         self.root.mkdir(parents=True, exist_ok=True)
         self.lock = threading.RLock()
         self.processes = {}
+        self.allocations = {}
+        self.shutdown = threading.Event()
+        self.scheduler = None
+        from mlpui.web.resources import gpu_inventory
+        self.gpu_inventory = gpu_inventory
         # Server shutdown owns its workers. Persisted active records from a crash
         # are reconciled by the worker lease, before another task is allowed.
 
@@ -64,44 +70,102 @@ class JobManager:
         settings = normalize(payload)
         summary = inspect_data(settings)
         with self.lock:
-            if any(job["status"] in ACTIVE for job in self.list()):
-                raise ValueError("已有任务在运行，请等待完成或停止后再启动。")
+            if self.shutdown.is_set():
+                raise ValueError("WebUI is shutting down")
+            device = settings["training"].get("device", "cpu")
+            if not isinstance(device, str) or not re.fullmatch(r"cpu|cuda(?::[0-9]+)?", device):
+                raise ValueError("Queue supports cpu, cuda or cuda:N")
             job_id = uuid4().hex
             folder = self.root / job_id
             folder.mkdir()
             state = {"id": job_id, "name": settings["name"], "family": settings["family"],
                      "task_type": settings["task_type"],
-                     "status": "starting", "created": time.time(), "epoch": 0,
+                     "status": "queued", "requested_device": device, "created": time.time(), "epoch": 0,
                      "epochs": settings["training"].get("epochs", 10), "history": [],
                      "summary": summary, "directory": str(folder)}
             write_json(folder / "config.json", settings)
             write_json(folder / "status.json", state)
-            env = dict(os.environ)
-            env["PYTHONIOENCODING"] = "utf-8"
-            import psutil
-            env["MLPUI_PARENT_PID"] = str(os.getpid())
-            env["MLPUI_PARENT_STARTED"] = str(psutil.Process().create_time())
-            env["PYTHONPATH"] = str(Path(__file__).resolve().parents[2]) + os.pathsep + env.get("PYTHONPATH", "")
+            self.tick()
+            self.enable_scheduler()
+            return self.get(job_id)
+
+    def enable_scheduler(self):
+        with self.lock:
+            if self.scheduler is None and not self.shutdown.is_set():
+                def loop():
+                    while not self.shutdown.wait(1):
+                        try:
+                            self.tick()
+                        except Exception:
+                            import traceback
+                            traceback.print_exc()
+                self.scheduler = threading.Thread(target=loop, daemon=True, name="mlpui-queue")
+                self.scheduler.start()
+
+    def tick(self):
+        with self.lock:
+            if self.shutdown.is_set():
+                return
+            # Slots remain reserved until the OS process exits, including after a
+            # worker publishes completed/stopped but is still releasing CUDA.
+            occupied = {self.allocations[job_id] for job_id, process in self.processes.items()
+                        if process.poll() is None}
+            queued = sorted((j for j in self.list() if j["status"] == "queued"), key=lambda j: (j["created"], j["id"]))
+            probe_error = False
             try:
-                with (folder / "train.log").open("wb") as log:
-                    self.processes[job_id] = subprocess.Popen(
-                        [sys.executable, "-u", "-m", "mlpui.web.worker", str(folder)],
-                        stdout=log, stderr=subprocess.STDOUT, env=env,
-                        creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0)
-            except Exception as exc:
-                state.update(status="failed", error=str(exc))
-                write_json(folder / "status.json", state)
-                raise
+                gpus = self.gpu_inventory() if any(j.get("requested_device", "cpu").startswith("cuda") for j in queued) else []
+            except Exception:
+                gpus, probe_error = [], True
+            for position, state in enumerate(queued, 1):
+                requested = state.get("requested_device", "cpu")
+                candidates = ["cpu"] if requested == "cpu" else [g["device"] for g in gpus if g["idle"] and requested in ("cuda", g["device"])]
+                device = next((d for d in candidates if d not in occupied), None)
+                if device is None:
+                    state.update(queue_position=position, queue_reason=("GPU 检测暂不可用，等待重试" if probe_error else "等待空闲 GPU") if requested.startswith("cuda") else "等待 CPU 任务完成")
+                    write_json(self.folder(state["id"]) / "status.json", state)
+                    continue
+                self.launch(state, device)
+                if state["status"] != "failed":
+                    occupied.add(device)
+
+    def launch(self, state, device):
+        job_id = state["id"]
+        folder = self.folder(job_id)
+        state.update(status="starting", assigned_device=device, started=time.time(), queue_position=None, queue_reason="")
+        write_json(folder / "status.json", state)
+        env = dict(os.environ)
+        env["PYTHONIOENCODING"] = "utf-8"
+        env["MLPUI_DEVICE"] = device
+        import psutil
+        env["MLPUI_PARENT_PID"] = str(os.getpid())
+        env["MLPUI_PARENT_STARTED"] = str(psutil.Process().create_time())
+        env["PYTHONPATH"] = str(Path(__file__).resolve().parents[2]) + os.pathsep + env.get("PYTHONPATH", "")
+        try:
+            with (folder / "train.log").open("wb") as log:
+                self.processes[job_id] = subprocess.Popen(
+                    [sys.executable, "-u", "-m", "mlpui.web.worker", str(folder)],
+                    stdout=log, stderr=subprocess.STDOUT, env=env,
+                    creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0)
+            self.allocations[job_id] = device
+        except Exception as exc:
+            state.update(status="failed", error=str(exc))
+            write_json(folder / "status.json", state)
             return state
 
     def stop(self, job_id):
         with self.lock:
             state = self.get(job_id)
-            if state["status"] in ACTIVE:
+            if state["status"] == "queued":
+                state.update(status="cancelled", queue_position=None, queue_reason="")
+                write_json(self.folder(job_id) / "status.json", state)
+            elif state["status"] in RUNNING:
                 (self.folder(job_id) / "stop").touch()
             return self.get(job_id)
 
     def close(self):
+        self.shutdown.set()
+        if self.scheduler is not None:
+            self.scheduler.join(timeout=10)
         for job_id, process in self.processes.items():
             if process.poll() is None:
                 self.stop(job_id)
@@ -134,7 +198,7 @@ def make_server(root, port=8675, host="127.0.0.1"):
         import fcntl
         fcntl.flock(lease, fcntl.LOCK_EX | fcntl.LOCK_NB)
     for job in manager.list():
-        if job["status"] in ACTIVE:
+        if job["status"] in RUNNING:
             job.update(status="interrupted", error="Previous WebUI session ended unexpectedly")
             write_json(manager.folder(job["id"]) / "status.json", job)
 
@@ -291,6 +355,8 @@ def make_server(root, port=8675, host="127.0.0.1"):
         lease.close()
         raise
     server.manager = manager
+    if any(job["status"] == "queued" for job in manager.list()):
+        manager.enable_scheduler()
     server.datasets = datasets
     server.lease = lease
     return server

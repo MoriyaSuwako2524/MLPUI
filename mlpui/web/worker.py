@@ -40,7 +40,11 @@ def run(folder):
     folder = Path(folder)
     # Prevent overlapping workers after a server crash/restart, including the
     # brief interval before the old worker detects its parent has disappeared.
-    training_lock = (folder.parent / ".training.lock").open("a+b")
+    device = os.environ.get("MLPUI_DEVICE", "cpu")
+    import re
+    if not re.fullmatch(r"cpu|cuda:[0-9]+", device):
+        raise ValueError("Invalid assigned worker device")
+    training_lock = (folder.parent / (".resource-" + device.replace(":", "-") + ".lock")).open("a+b")
     if training_lock.tell() == 0:
         training_lock.write(b"0")
         training_lock.flush()
@@ -93,9 +97,12 @@ def run(folder):
                 time.sleep(.1)
         publish(status="running", phase="loading")
         import torch
+        if device.startswith("cuda"):
+            torch.cuda.set_device(device)
         from mlpui.training import Trainer, TrainingConfig, TrainingStopped
         from mlpui.web.config import dataset
         options = dict(settings.get("training", {}))
+        options["device"] = device
         options["dtype"] = getattr(torch, options.get("dtype", "float32"))
         trainer = Trainer(settings["family"], settings["model_config"], TrainingConfig(**options),
                           checkpoint=settings.get("checkpoint"))

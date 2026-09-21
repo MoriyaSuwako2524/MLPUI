@@ -29,7 +29,7 @@ def wait_job(manager, job_id, terminal=True):
     deadline = time.monotonic() + 45
     while time.monotonic() < deadline:
         state = manager.get(job_id)
-        if state["status"] not in {"starting", "running", "stopping"}:
+        if state["status"] not in {"queued", "starting", "running", "stopping"}:
             return state
         if not terminal and (state.get("phase") == "training" or state.get("history")):
             return state
@@ -84,8 +84,9 @@ def test_real_job_stop_failure_and_reload(tmp_path):
         assert JobManager(tmp_path / "runs").list()[0]["status"] == "completed"
         config["training"]["epochs"] = 10000
         job = manager.start(config)
-        with pytest.raises(ValueError, match="已有任务"):
-            manager.start(config)
+        queued = manager.start(config)
+        assert queued["status"] == "queued"
+        assert manager.stop(queued["id"])["status"] == "cancelled"
         wait_job(manager, job["id"], terminal=False)
         manager.stop(job["id"])
         result = wait_job(manager, job["id"])

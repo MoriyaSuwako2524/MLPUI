@@ -1,6 +1,6 @@
 const $ = id => document.getElementById(id);
-const active = new Set(['starting','running','stopping']);
-const statuses = {starting:'准备中',running:'训练中',completed:'已完成',stopped:'已停止',failed:'失败',interrupted:'已中断'};
+const active = new Set(['queued','starting','running','stopping']);
+const statuses = {queued:'排队中',cancelled:'已取消',starting:'准备中',running:'训练中',completed:'已完成',stopped:'已停止',failed:'失败',interrupted:'已中断'};
 let jobs = [], models = {}, current = null, pollBusy = false;
 const escapeHTML = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 function notify(message='') { $('notice').textContent=message; $('notice').hidden=!message; }
@@ -83,13 +83,14 @@ function route() {
 }
 function renderJobs() {
   $('count-all').textContent=jobs.length;
-  $('count-active').textContent=jobs.filter(j=>active.has(j.status)).length;
+  $('count-active').textContent=jobs.filter(j=>active.has(j.status)&&j.status!=='queued').length;
+  $('count-queued').textContent=jobs.filter(j=>j.status==='queued').length;
   $('count-done').textContent=jobs.filter(j=>j.status==='completed').length;
   if(!jobs.length) {
     $('job-list').innerHTML='<div class="empty"><div class="empty-icon">▦</div><h2>开始你的第一个任务</h2><p>连接 .npy 数据，配置模型。每次实验都有清晰的记录。</p><a class="button primary" href="#new">＋ 创建任务</a></div>';
     return;
   }
-  $('job-list').innerHTML='<div class="table-wrap"><table><thead><tr><th>任务</th><th>模型</th><th>状态</th><th>进度</th><th>创建时间</th></tr></thead><tbody>'+jobs.map(j=>`<tr><td><a href="#job/${j.id}">${escapeHTML(j.name)}</a><small>${j.task_type==='evaluation'?'评估':'训练'} · ${j.id.slice(0,8)}</small></td><td>${j.family==='newtonnet'?'NewtonNet':'TorchMD-Net'}</td><td><span class="badge ${escapeHTML(j.status)}">${j.stop_requested&&active.has(j.status)?'正在停止':(j.task_type==='evaluation'&&j.status==='running'?'评估中':statuses[j.status])||escapeHTML(j.status)}</span></td><td>${j.task_type==='evaluation'?`${j.completed||0} / ${j.summary.evaluation.samples} 结构`:`${j.history.length} / ${j.epochs} epochs`}</td><td>${escapeHTML(new Date(j.created*1000).toLocaleString())}</td></tr>`).join('')+'</tbody></table></div>';
+  $('job-list').innerHTML='<div class="table-wrap"><table><thead><tr><th>任务</th><th>模型</th><th>状态</th><th>进度</th><th>创建时间</th></tr></thead><tbody>'+jobs.map(j=>`<tr><td><a href="#job/${j.id}">${escapeHTML(j.name)}</a><small>${j.task_type==='evaluation'?'评估':'训练'} · ${j.id.slice(0,8)} · ${escapeHTML(j.assigned_device||j.requested_device||'cpu')}${j.status==='queued'?' · 等待中':''}</small></td><td>${j.family==='newtonnet'?'NewtonNet':'TorchMD-Net'}</td><td><span class="badge ${escapeHTML(j.status)}">${j.stop_requested&&active.has(j.status)?'正在停止':(j.task_type==='evaluation'&&j.status==='running'?'评估中':statuses[j.status])||escapeHTML(j.status)}</span></td><td>${j.task_type==='evaluation'?`${j.completed||0} / ${j.summary.evaluation.samples} 结构`:`${j.history.length} / ${j.epochs} epochs`}</td><td>${escapeHTML(new Date(j.created*1000).toLocaleString())}</td></tr>`).join('')+'</tbody></table></div>';
 }
 function renderDetail(job) {
   current=job;
@@ -109,7 +110,9 @@ function renderDetail(job) {
   }
   $('detail-error').hidden=!job.error; $('detail-error').textContent=job.error||'';
   $('stop').hidden=!active.has(job.status); $('stop').disabled=job.stop_requested;
-  $('stop').textContent=job.stop_requested?'正在停止…':'停止任务';
+  $('stop').textContent=job.status==='queued'?'取消排队':job.stop_requested?'正在停止…':'停止任务';
+  if(job.status==='queued') $('progress-label').textContent=`排队位置 ${job.queue_position||'—'} · ${job.queue_reason||'等待调度'}`;
+  $('detail-meta').textContent+=` · ${job.assigned_device||job.requested_device||'cpu'}`;
   $('output-path').textContent=job.directory;
   $('download-model').hidden=!job.checkpoint || !['completed','stopped'].includes(job.status);
   $('download-model').href=`/api/jobs/${job.id}/model`;
@@ -171,7 +174,7 @@ function updateTaskType() {
   $('checkpoint').required=evaluating;
   $('split-hint').hidden=evaluating;
   $('training-hint').hidden=evaluating;
-  $('start').textContent=evaluating?'开始评估 →':'开始训练 →';
+  $('start').textContent=evaluating?'提交评估 →':'提交训练 →';
   for(const id of ['epochs','batch-size','learning-rate','seed','weight-energy','weight-forces','train-charges','weight-charges','save-interval','max-checkpoints','test-interval','validation-shards','validation-directory','test-shards','test-directory']) {
     $(id).closest('label').hidden=evaluating; $(id).disabled=evaluating;
   }
