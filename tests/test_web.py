@@ -201,6 +201,13 @@ def test_evaluation_task_and_result_endpoint(tmp_path):
         assert state["status"] == "completed", state
         assert state["task_type"] == "evaluation"
         assert state["evaluation"]["metrics"]["forces"]["count"] == 18
+        assert set(state["evaluation"]["plots"]) == {"energy", "forces"}
+        for key in ("energy", "forces"):
+            for extension, mime in (("png", "image/png"), ("svg", "image/svg+xml")):
+                with urlopen(base + f'/api/jobs/{job["id"]}/plots/{key}.{extension}') as response:
+                    assert response.headers["Content-Type"] == mime
+                    content = response.read()
+                    assert content.startswith(b"\x89PNG") if extension == "png" else b"<svg" in content
         with urlopen(base + f'/api/jobs/{job["id"]}/evaluation') as response:
             assert json.load(response) == state["evaluation"]
         assert not (server.manager.folder(job["id"]) / "model.pt").exists()

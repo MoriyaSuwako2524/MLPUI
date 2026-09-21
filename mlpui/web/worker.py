@@ -71,7 +71,7 @@ def run(folder):
     def progress(event):
         nonlocal last_write
         now = time.monotonic()
-        if event["phase"] in {"epoch_end", "test", "validation"} or now - last_write > .5:
+        if event["phase"] in {"epoch_end", "test", "validation", "plotting"} or now - last_write > .5:
             publish(**event)
             last_write = now
         if event["phase"] == "epoch_end":
@@ -104,6 +104,7 @@ def run(folder):
             print(f"Evaluating {len(data)} structures on {trainer.config.device}", flush=True)
             try:
                 result = trainer.evaluate(data, on_progress=progress,
+                                          plot_dir=folder / "plots",
                                           should_stop=lambda: (folder / "stop").exists())
             except TrainingStopped:
                 publish(status="stopped", phase="stopped")

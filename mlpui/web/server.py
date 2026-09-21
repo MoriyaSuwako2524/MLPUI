@@ -170,7 +170,7 @@ def make_server(root, port=8675, host="127.0.0.1"):
                     import torch
                     return self.respond({"models": presets(), "cuda": torch.cuda.is_available(),
                                          "root": str(manager.root)})
-                match = re.fullmatch(r"/api/jobs/([a-f0-9]{32})(?:/(log|config|evaluation|model|checkpoints/epoch_[0-9]{6,}\.pt))?", path)
+                match = re.fullmatch(r"/api/jobs/([a-f0-9]{32})(?:/(log|config|evaluation|model|plots/(?:energy|forces|charges|dipole|stress)\.(?:png|svg)|checkpoints/epoch_[0-9]{6,}\.pt))?", path)
                 if match:
                     job_id, action = match.groups()
                     folder = manager.folder(job_id)
@@ -186,6 +186,16 @@ def make_server(root, port=8675, host="127.0.0.1"):
                         return self.respond(read_json(folder / "config.json"))
                     if action == "evaluation":
                         return self.respond(read_json(folder / "evaluation.json"))
+                    if action and action.startswith("plots/"):
+                        file = folder / action
+                        content = file.read_bytes()
+                        self.send_response(200)
+                        self.send_header("Content-Type", "image/png" if file.suffix == ".png" else "image/svg+xml")
+                        self.send_header("Content-Length", str(len(content)))
+                        self.send_header("X-Content-Type-Options", "nosniff")
+                        self.end_headers()
+                        self.wfile.write(content)
+                        return
                     if action == "model" or (action and action.startswith("checkpoints/")):
                         if action == "model":
                             if manager.get(job_id)["status"] not in {"completed", "stopped"}:

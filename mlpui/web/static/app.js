@@ -98,7 +98,7 @@ function renderDetail(job) {
   if(evaluating) {
     $('progress').value=100*(job.completed||0)/(job.summary.evaluation.samples||1);
     $('progress-label').textContent=`${job.completed||0} / ${job.summary.evaluation.samples} 结构`+(job.phase==='loading'?' · 正在加载模型与数据':'');
-    if(job.status==='running') $('detail-status').textContent='评估中';
+    if(job.status==='running') $('detail-status').textContent=job.phase==='plotting'?'正在绘图':'评估中';
   }
   $('detail-error').hidden=!job.error; $('detail-error').textContent=job.error||'';
   $('stop').hidden=!active.has(job.status); $('stop').disabled=job.stop_requested;
@@ -113,6 +113,12 @@ function renderDetail(job) {
   $('evaluation-panel').hidden=!evaluating;
   $('download-evaluation').hidden=!job.evaluation;
   $('download-evaluation').href=`/api/jobs/${job.id}/evaluation`;
+  const plots=job.evaluation?.plots;
+  const plotHTML=plots?Object.keys(plots).map(key=>{
+    const url=`/api/jobs/${job.id}/plots/${encodeURIComponent(key)}`;
+    return `<article class="evaluation-plot"><h3>${escapeHTML(key)}</h3><img src="${url}.png" alt="${escapeHTML(key)}：参考值与预测值对比" loading="lazy"><div><a href="${url}.png" download="${key}.png">下载 PNG</a> · <a href="${url}.svg" download="${key}.svg">下载 SVG</a></div></article>`;
+  }).join(''):(job.evaluation?'<p class="footnote">此任务尚无图表，请重新运行评估生成。</p>':'');
+  if($('evaluation-plots').innerHTML!==plotHTML) $('evaluation-plots').innerHTML=plotHTML;
   $('evaluation-metrics').innerHTML=job.evaluation?'<table><thead><tr><th>指标</th><th>MAE</th><th>RMSE</th><th>MSE</th></tr></thead><tbody>'+Object.entries(job.evaluation.metrics).map(([key,m])=>`<tr><td>${escapeHTML(key)}</td><td>${m.mae.toExponential(5)}</td><td>${m.rmse.toExponential(5)}</td><td>${m.mse.toExponential(5)}</td></tr>`).join('')+'</tbody></table>':'尚无完整评估结果';
   drawChart();
 }

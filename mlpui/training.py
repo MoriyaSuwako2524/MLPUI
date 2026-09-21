@@ -120,7 +120,7 @@ class Trainer:
         self.optimizer = torch.optim.Adam(self.model.parameters(), lr=self.config.learning_rate)
         self.history = []
 
-    def _errors(self, sample):
+    def _errors(self, sample, on_prediction=None):
         atoms = NpyDataset.atoms(sample)
         if "stress" in self.config.loss_weights and not np.all(atoms.pbc):
             raise ValueError("Stress training requires periodic structures")
@@ -150,6 +150,9 @@ class Trainer:
             errors[prop] = prediction.reshape(target.shape) - target
             if not torch.isfinite(errors[prop]).all():
                 raise ValueError(f"Non-finite prediction or target for {prop}")
+            if on_prediction is not None:
+                on_prediction(prop, target.detach().cpu().double().numpy().reshape(-1),
+                              prediction.detach().cpu().double().numpy().reshape(-1))
         return errors
 
     def _loss(self, sample):
@@ -159,7 +162,7 @@ class Trainer:
             raise ValueError("Non-finite training loss")
         return total, losses
 
-    def evaluate(self, data, *, on_progress=None, should_stop=None):
+    def evaluate(self, data, *, on_progress=None, should_stop=None, plot_dir=None):
         """Evaluate all scalar components without backward or optimizer updates.
 
         Energy is per structure; forces are pooled over all Cartesian components.
@@ -168,12 +171,16 @@ class Trainer:
         data = data if isinstance(data, (NpyDataset, NpyShards)) else NpyDataset(data)
         self.model.eval()
         totals = {key: dict(count=0, absolute=0., squared=0.) for key in self.config.loss_weights}
+        pairs = {key: [] for key in totals} if plot_dir is not None else None
+
+        def collect(key, reference, prediction):
+            pairs[key].append(np.column_stack((reference, prediction)))
         for index, sample in enumerate(data):
             if should_stop is not None and should_stop():
                 raise TrainingStopped("Evaluation stopped by user")
             # Forces require differentiation with respect to positions.
             with torch.enable_grad():
-                errors = self._errors(sample)
+                errors = self._errors(sample, on_prediction=collect) if pairs is not None else self._errors(sample)
             for key, error in errors.items():
                 error = error.detach().to(device="cpu", dtype=torch.float64)
                 totals[key]["count"] += error.numel()
@@ -186,8 +193,14 @@ class Trainer:
             mse = total["squared"] / total["count"]
             metrics[key] = dict(mae=total["absolute"] / total["count"],
                                 mse=mse, rmse=math.sqrt(mse), count=total["count"])
-        return {"samples": len(data), "aggregation": "all_scalar_components",
+        result = {"samples": len(data), "aggregation": "all_scalar_components",
                 "units": "dataset units after configured conversion", "metrics": metrics}
+        if pairs is not None:
+            from mlpui.evaluation_plots import save_parity_plots
+            if on_progress is not None:
+                on_progress({"phase": "plotting", "completed": len(data), "total": len(data)})
+            result["plots"] = save_parity_plots(pairs, metrics, plot_dir, should_stop=should_stop)
+        return result
 
     def fit(self, train_data, validation_data=None, *, test_data=None, output_dir=None,
             on_progress=None, should_stop=None):

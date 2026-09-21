@@ -272,6 +272,18 @@ forces, or both, plus device and precision. Evaluation performs one pass without
 updating model weights or writing a new model. The task can be stopped and has
 its own progress, log, and result page. Old tasks default to the training type.
 
+Each new evaluation generates separate reference-versus-prediction density plots
+for every selected property (energy, forces, charges, etc.). The plots show the
+identity line, MAE, RMSE, and scalar component count, using all evaluated values
+in the configured converted dataset units. Vector properties pool their components.
+Figures appear in the result page and are saved as `plots/<property>.png` and
+`plots/<property>.svg`, with individual download links. Existing evaluations must
+be rerun to generate figures. Update dependencies with `python -m pip install -e .`
+after pulling this feature (requires Matplotlib). Python callers can use
+`trainer.evaluate(data, plot_dir="evaluation/plots")`; without `plot_dir`, the
+Python API retains its metrics-only behavior. Plotting retains reference/prediction
+arrays in CPU memory, so memory use grows with the number of evaluated components.
+
 Completed evaluations save `evaluation.json` in the task directory, also
 accessible from the result page. It contains MAE, MSE, RMSE and scalar counts:
 energy is per structure, forces are pooled over all Cartesian components across
