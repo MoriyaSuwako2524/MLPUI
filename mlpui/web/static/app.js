@@ -49,7 +49,10 @@ function payload() {
   }
   const result={name:text('name'),family:text('family'),model_config:model,train,
     training:{epochs:number('epochs'),batch_size:number('batch-size'),learning_rate:number('learning-rate'),dtype:text('dtype'),device:text('device'),seed:number('seed'),loss_weights:weights,save_interval:number('save-interval'),max_checkpoints:number('max-checkpoints'),test_interval:number('test-interval')}};
-  if(text('checkpoint')) result.checkpoint=text('checkpoint');
+  if(text('training-mode')==='continue') {
+    if(!text('checkpoint')) throw new Error('继续训练需要填写已有 .pt 模型路径');
+    result.checkpoint=text('checkpoint');
+  }
   if($('early-stopping').checked) Object.assign(result.training,{early_stopping:true,
     early_stopping_monitor:text('early-monitor'),early_stopping_patience:number('early-patience'),
     early_stopping_min_delta:number('early-min-delta')});
@@ -180,7 +183,7 @@ async function refresh() {
 $('family').addEventListener('change',()=>{$('model-config').value=JSON.stringify(models[text('family')],null,2);});
 function updateTaskType() {
   const evaluating=text('task-type')==='evaluation';
-  $('checkpoint').required=evaluating;
+  updateTrainingMode();
   $('split-hint').hidden=evaluating;
   $('training-hint').hidden=evaluating;
   $('start').textContent=evaluating?'提交评估 →':'提交训练 →';
@@ -197,6 +200,17 @@ function updateTaskType() {
   $('preview-result').textContent='检查文件、数组形状与标签。';
 }
 $('task-type').addEventListener('change',updateTaskType);
+function updateTrainingMode(){
+  const evaluating=text('task-type')==='evaluation';
+  const needsCheckpoint=evaluating||text('training-mode')==='continue';
+  $('training-mode').closest('label').hidden=evaluating;
+  $('training-mode').disabled=evaluating;
+  $('checkpoint').closest('label').hidden=!needsCheckpoint;
+  $('checkpoint').disabled=!needsCheckpoint;
+  $('checkpoint').required=needsCheckpoint;
+  $('checkpoint-hint').textContent=evaluating?'评估必填':'继续训练必填';
+}
+$('training-mode').addEventListener('change',updateTrainingMode);
 function updateEarlyStopping(){
   const evaluating=text('task-type')==='evaluation';
   $('early-stopping').disabled=evaluating;

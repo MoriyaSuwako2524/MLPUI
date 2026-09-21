@@ -300,6 +300,14 @@ with corrected mappings in the same page. Old tasks retain their data paths.
 For correlated trajectories, use ordered splitting or register separate trajectory
 groups; random frame splitting alone does not prevent temporal leakage.
 
+For training, **训练方式** defaults to **从头训练**. Choose **从已有 .pt 模型继续训练**
+to reveal the required checkpoint path (`model.pt`, `best.pt`, or a periodic
+checkpoint). The model family and structure configuration must match the saved
+model. Existing weights are loaded, while optimizer, epoch numbering and early
+stopping counters start afresh. Outputs go to a new task directory and do not
+overwrite the source checkpoint. Switching back to scratch training ignores any
+previously entered checkpoint path.
+
 For a standalone evaluation, choose **评估已有模型** under **新建任务**.
 Supply an existing checkpoint, matching model structure configuration, and an
 `.npy` dataset (standard, custom mapping, or prefixed shards). Select energy,

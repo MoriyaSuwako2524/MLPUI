@@ -68,7 +68,8 @@
         <label class="wide">任务类型<select id="task-type"><option value="training">训练</option><option value="evaluation">评估已有模型</option></select></label>
         <label>任务名称<input id="name" required maxlength="100" placeholder="例如 chorismate-newtonnet"></label>
         <label>模型<select id="family"><option value="newtonnet">NewtonNet</option><option value="torchmdnet">TorchMD-Net / TensorNet</option></select></label>
-        <label class="wide">模型路径 <span class="optional" id="checkpoint-hint">训练可选 · 评估必填</span><input id="checkpoint" placeholder="/path/to/model.pt"></label>
+        <label class="wide">训练方式<select id="training-mode"><option value="scratch">从头训练</option><option value="continue">从已有 .pt 模型继续训练</option></select><small>继续训练会加载已有权重；优化器、epoch 和早停计数重新开始，结果保存到新任务目录。</small></label>
+        <label class="wide">模型路径 <span class="optional" id="checkpoint-hint">继续训练或评估时必填</span><input id="checkpoint" placeholder="/path/to/model.pt 或 best.pt"><small>填写 WebUI 所在机器的路径；模型类型和下方结构配置须与原模型一致。</small></label>
       </div><details><summary>模型结构配置</summary><p class="hint">从头训练可用默认值；微调时需与原模型结构一致。</p><textarea id="model-config" rows="12" spellcheck="false" aria-label="模型结构 JSON"></textarea></details></div>
       <div class="panel form-panel"><h2><b class="step">02</b> NumPy 数据</h2><div class="grid two">
         <label class="wide">从数据集库选择<select id="managed-train"><option value="">手动填写路径和文件映射</option></select><small>选择后使用已登记的数据和单位配置。</small></label>
