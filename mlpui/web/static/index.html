@@ -1,12 +1,13 @@
 <!doctype html>
 <html lang="zh-CN">
-<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>MLPUI · Training Studio</title><link rel="stylesheet" href="/style.css"><script src="/app.js" defer></script></head>
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>MLPUI · Training Studio</title><link rel="stylesheet" href="/style.css"><script src="/app.js" defer></script><script src="/datasets.js" defer></script></head>
 <body>
 <aside>
   <a class="brand" href="#jobs"><span class="mark">M</span><span>MLPUI<small>TRAINING STUDIO</small></span></a>
   <div class="nav-label">工作空间</div>
   <a class="nav active" id="nav-jobs" href="#jobs"><span>▦</span> 任务列表</a>
   <a class="nav" id="nav-new" href="#new"><span>＋</span> 新建任务</a>
+  <a class="nav" id="nav-datasets" href="#datasets"><span>▤</span> 数据集</a>
   <div class="side-bottom"><span class="dot"></span> 本地工作空间<small>Machine learning potentials<br>NumPy → Train → Model</small></div>
 </aside>
 <main>
@@ -17,6 +18,45 @@
     <div class="stats"><div><span>全部任务</span><strong id="count-all">0</strong></div><div><span><i class="dot purple"></i> 运行中</span><strong id="count-active">0</strong></div><div><span><i class="dot"></i> 已完成</span><strong id="count-done">0</strong></div></div>
     <div class="panel"><div class="panel-heading"><h2>最近任务</h2><span class="muted">自动刷新 · 每次运行一个任务</span></div><div id="job-list"></div></div>
     <p class="footnote" id="runs-root"></p>
+  </section>
+  <section id="datasets-view" hidden>
+    <div class="page-title"><div><div class="eyebrow">DATA LIBRARY</div><h1>数据集</h1><p>登记、上传和划分分子数据，在任务中重复使用。</p></div><button id="dataset-new" class="primary">＋ 添加数据集</button></div>
+    <div class="panel form-panel" id="dataset-create-panel" hidden>
+      <h2>添加数据集</h2><form id="dataset-form"><div class="grid two">
+        <label>名称<input id="dataset-name" required maxlength="100"></label>
+        <label>来源<select id="dataset-source"><option value="existing">服务器已有目录</option><option value="upload">从本机上传 NPY 文件</option></select></label>
+        <label class="wide" id="dataset-directory-label">服务器目录<input id="dataset-directory" placeholder="/scratch/.../npys" required></label>
+        <label class="wide" id="dataset-upload-label" hidden>选择 NPY 文件<input id="dataset-files" type="file" accept=".npy" multiple><small>可一次选择多个文件，保留文件名；单文件最大 20 GiB，上传到 WebUI 所在机器。</small></label>
+        <label>命名方式<select id="dataset-layout"><option value="standard">标准名称 · z.npy / pos.npy</option><option value="qm">QM 分组 · qm_coord_{shard}.npy</option><option value="custom">自定义文件映射</option></select></label>
+        <label>分组<input id="dataset-shards" placeholder="无分组留空；例如 w00, w01"></label>
+      </div>
+      <details id="dataset-mapping-details"><summary>文件映射与单位</summary><p class="hint">留空或 {} 自动读取标准字段。自定义映射仅填写实际存在的字段，支持 {shard}。charges 是原子电荷，charge 是结构总电荷。</p>
+        <label>字段与文件名 JSON<textarea id="dataset-mapping" rows="7" spellcheck="false">{}</textarea></label>
+        <div class="grid two"><label>能量换算倍数<input id="dataset-energy-scale" type="number" step="any" value="1"></label><label>长度换算倍数<input id="dataset-length-scale" type="number" step="any" value="1"></label></div>
+        <label class="check"><input id="dataset-gradients" type="checkbox">力文件存储的是梯度（自动取负号）</label>
+      </details>
+      <div class="preview-row"><button id="dataset-save" class="primary" type="submit">检查并添加</button><button id="dataset-cancel" type="button">收起</button><span id="dataset-progress" role="status"></span></div>
+      </form>
+    </div>
+    <div class="dataset-toolbar"><label>搜索<input id="dataset-search" placeholder="名称、字段或路径"></label><label class="check"><input type="checkbox" id="dataset-show-archived">显示归档</label></div>
+    <div id="dataset-list"></div>
+    <div class="panel form-panel" id="dataset-detail" hidden>
+      <h2 id="dataset-detail-title"></h2><p id="dataset-detail-info" class="footnote"></p>
+      <div class="preview-row"><input id="dataset-rename" aria-label="数据集新名称" maxlength="100"><button id="dataset-rename-save">保存名称</button><button id="dataset-archive">归档</button><button id="dataset-inspect">重新检查</button></div>
+      <div id="dataset-file-list" class="table-wrap"></div>
+      <p class="hint">归档仅隐藏目录记录，保留原文件和已创建的任务。</p>
+      <details id="dataset-split-details"><summary>基于此数据集重新划分</summary>
+        <form id="dataset-split-form"><div class="grid three">
+          <label class="wide">划分名称<input id="dataset-split-name" required maxlength="80" placeholder="例如 experiment-v1"></label>
+          <label>训练比例<input id="dataset-train-ratio" type="number" value="80" min="0" step="any"></label>
+          <label>验证比例<input id="dataset-validation-ratio" type="number" value="10" min="0" step="any"></label>
+          <label>测试比例<input id="dataset-test-ratio" type="number" value="10" min="0" step="any"></label>
+          <label>划分方式<select id="dataset-split-method"><option value="random">随机打乱结构</option><option value="ordered">按原顺序切分</option></select></label>
+          <label>随机种子<input id="dataset-split-seed" type="number" value="0" min="0" max="4294967295"></label>
+        </div><p class="hint">比例按相对权重分配，0 表示不生成该子集。创建独立 npy 副本并保存索引，原数据保持不变。相关轨迹建议按原顺序切分或分别登记不同分组，以避免相邻帧泄漏。</p>
+        <div class="preview-row"><button id="dataset-split-save" class="primary" type="submit">生成划分</button><span id="dataset-split-progress" role="status"></span></div></form>
+      </details>
+    </div>
   </section>
   <section id="new-view" hidden>
     <div class="page-title"><div><div class="eyebrow">NEW EXPERIMENT</div><h1>创建训练任务</h1><p>选择模型，连接 NumPy 数据，然后开始训练。</p></div><a class="button" href="#jobs">返回任务</a></div>
@@ -29,6 +69,9 @@
         <label class="wide">模型路径 <span class="optional" id="checkpoint-hint">训练可选 · 评估必填</span><input id="checkpoint" placeholder="/path/to/model.pt"></label>
       </div><details><summary>模型结构配置</summary><p class="hint">从头训练可用默认值；微调时需与原模型结构一致。</p><textarea id="model-config" rows="12" spellcheck="false" aria-label="模型结构 JSON"></textarea></details></div>
       <div class="panel form-panel"><h2><b class="step">02</b> NumPy 数据</h2><div class="grid two">
+        <label class="wide">从数据集库选择<select id="managed-train"><option value="">手动填写路径和文件映射</option></select><small>选择后使用已登记的数据和单位配置。</small></label>
+        <label>验证数据集<select id="managed-validation"><option value="">使用下方手动配置 / 不使用</option></select></label>
+        <label>测试数据集<select id="managed-test"><option value="">使用下方手动配置 / 不使用</option></select></label>
         <label class="wide">数据目录<input id="directory" required placeholder="/scratch/moriya/codex/chorismate_mutase/calc1/npys"><small>填写 WebUI 所在机器的路径。</small></label>
         <label class="wide">文件命名<select id="layout"><option value="pete">QM 窗口 · qm_coord_w00.npy</option><option value="standard">标准文件 · z.npy / pos.npy</option><option value="custom">自定义映射</option></select></label>
         <label>数据分组<input id="shards" value="w00, w01" placeholder="w00, w01"><small>逗号分隔；没有分组时留空。</small></label>

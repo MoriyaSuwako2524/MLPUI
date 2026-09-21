@@ -15,6 +15,7 @@ function number(id) { const v=Number(text(id)); if(!text(id)||!Number.isFinite(v
 function groups(id) { return text(id).split(',').map(v=>v.trim()).filter(Boolean); }
 function payload() {
   const evaluating=text('task-type')==='evaluation';
+  const selected=datasetRecords.find(d=>d.id===text('managed-train'));
   const weights={};
   for(const key of ['energy','forces','charges']) {
     if(evaluating) {if($('eval-'+key).checked) weights[key]=1;}
@@ -26,9 +27,9 @@ function payload() {
     if(['energy','forces','charges'].includes(key) && !(key in weights)) continue;
     if(text('file-'+key)) files[key]=text('file-'+key);
   }
-  for(const key of Object.keys(weights)) if(!files[key]) throw new Error('请填写 '+key+' 标签文件');
-  const train={directory:text('directory'),files,gradients:$('gradients').checked,energy_scale:number('energy-scale'),length_scale:number('length-scale')};
-  if(groups('shards').length) train.shards=groups('shards');
+  for(const key of Object.keys(weights)) if(selected?!selected.summary.fields.includes(key):!files[key]) throw new Error('数据集缺少 '+key+' 标签');
+  const train=selected?structuredClone(selected.spec):{directory:text('directory'),files,gradients:$('gradients').checked,energy_scale:number('energy-scale'),length_scale:number('length-scale')};
+  if(!selected&&groups('shards').length) train.shards=groups('shards');
   let model;
   try { model=JSON.parse($('model-config').value); } catch { throw new Error('模型结构配置不是有效的 JSON'); }
   const modelSettings=text('family')==='newtonnet'?(model.model||model):model;
@@ -37,8 +38,8 @@ function payload() {
     modelSettings.charge_constraint=true;
   }
   if(modelSettings.charge_constraint) {
-    if(!text('file-charge')) throw new Error('硬约束需要每个结构的总电荷 Q 文件');
-    files.charge=text('file-charge');
+    if(selected?!selected.summary.fields.includes('charge'):!text('file-charge')) throw new Error('硬约束需要每个结构的总电荷 Q 文件');
+    if(!selected) files.charge=text('file-charge');
   }
   if(evaluating) {
     if(!text('checkpoint')) throw new Error('评估需要填写已有模型路径');
@@ -59,14 +60,20 @@ function payload() {
     delete result.test.shards;
     if(groups('test-shards').length) result.test.shards=groups('test-shards');
   }
+  for(const split of ['validation','test']) {
+    const record=datasetRecords.find(d=>d.id===text('managed-'+split));
+    if(record) result[split]=structuredClone(record.spec);
+  }
   return result;
 }
 function route() {
   const hash=location.hash || '#jobs';
-  const view=hash==='#new'?'new':hash.startsWith('#job/')?'detail':'jobs';
-  for(const name of ['jobs','new','detail']) $(name+'-view').hidden=name!==view;
-  $('nav-jobs').classList.toggle('active',view!=='new'); $('nav-new').classList.toggle('active',view==='new');
-  $('breadcrumb').textContent=view==='new'?'新建任务':view==='detail'?'任务详情':'任务列表';
+  const view=hash==='#datasets'?'datasets':hash==='#new'?'new':hash.startsWith('#job/')?'detail':'jobs';
+  for(const name of ['jobs','new','detail','datasets']) $(name+'-view').hidden=name!==view;
+  $('nav-jobs').classList.toggle('active',view==='jobs'||view==='detail'); $('nav-new').classList.toggle('active',view==='new');
+  $('nav-datasets').classList.toggle('active',view==='datasets');
+  $('breadcrumb').textContent=view==='datasets'?'数据集':view==='new'?'新建任务':view==='detail'?'任务详情':'任务列表';
+  if(view==='datasets'||view==='new') loadDatasets().catch(error=>notify(error.message));
   notify(); current=null;
   if(view==='detail') {
     $('detail-name').textContent='加载中…'; $('detail-meta').textContent=''; $('log').textContent='加载中…';
@@ -169,6 +176,7 @@ function updateTaskType() {
     $(id).closest('label').hidden=evaluating; $(id).disabled=evaluating;
   }
   for(const id of ['eval-energy','eval-forces','eval-charges']) $(id).closest('label').hidden=!evaluating;
+  for(const split of ['validation','test']) $('managed-'+split).closest('label').hidden=evaluating;
   $('weight-charges').disabled=evaluating||!$('train-charges').checked;
   $('new-view').querySelector('h1').textContent=evaluating?'创建评估任务':'创建训练任务';
   $('new-view').querySelector('.page-title p').textContent=evaluating?'选择已有模型和带标签的 npy 数据，计算误差。模型结构配置须与原模型一致。':'选择模型，连接 NumPy 数据，然后开始训练。';
@@ -209,4 +217,3 @@ async function init(){
   }catch(error){notify(error.message);}
   updateTaskType();route();setInterval(refresh,2000);
 }
-init();

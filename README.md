@@ -265,6 +265,33 @@ Host/Origin checks are not authentication. Keep the browser on localhost and
 use the same port at both ends of the SSH tunnel.
 UMA is not included in this UI.
 
+The **数据集** page provides a persistent NPY dataset library:
+
+- Register a server-side directory without moving its files, or upload multiple
+  numeric `.npy` files from the browser (20 GiB per file; streamed to disk).
+- Inspect sample counts, fields, shapes, dtypes and file sizes; search, rename,
+  recheck, archive and restore records. Archiving retains files and existing tasks.
+- Standard names are discovered automatically. QM prefixes and `{shard}` groups
+  use the same explicit file mappings and unit conversions as training.
+- Split an existing dataset using train/validation/test ratios and a random seed,
+  or preserve structure order. Zero ratios omit a subset; requested nonzero subsets
+  must contain at least one structure. Integer counts use largest remainders.
+- Splits create independent numeric NPY copies with `offsets.npy` for variable atom
+  counts. Every field follows the same structure indices. Unit conversion and
+  gradient sign conversion are applied once; the new specs use scale 1 and forces.
+- Choose a record when creating a training or evaluation task. Choosing a generated
+  training subset also selects the validation/test siblings from that split.
+
+The catalog and uploads live under `<runs-dir>/datasets/`. Each split stores
+`split-<id>/split.json` and `<train|validation|test>_indices.npy`, indexing its
+immediate source dataset (groups concatenated in their configured order).
+Keep the same `--runs-dir` across cluster jobs to retain the library. Splits require
+additional disk space and finish before appearing as usable records. Uploads are
+sequential, not resumable across browser reloads; failed validation can be retried
+with corrected mappings in the same page. Old tasks retain their data paths.
+For correlated trajectories, use ordered splitting or register separate trajectory
+groups; random frame splitting alone does not prevent temporal leakage.
+
 For a standalone evaluation, choose **评估已有模型** under **新建任务**.
 Supply an existing checkpoint, matching model structure configuration, and an
 `.npy` dataset (standard, custom mapping, or prefixed shards). Select energy,

@@ -9,11 +9,12 @@ import sys
 import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from urllib.parse import urlparse
+from urllib.parse import urlparse, unquote
 from uuid import uuid4
 
 from mlpui.web.config import normalize, inspect_data, presets
 from mlpui.web.worker import write_json, read_json
+from mlpui.web.datasets import DatasetManager
 
 ACTIVE = {"starting", "running", "stopping"}
 
@@ -118,6 +119,7 @@ class JobManager:
 
 def make_server(root, port=8675, host="127.0.0.1"):
     manager = JobManager(root)
+    datasets = DatasetManager(manager.root / "datasets")
     # Reject a second server using the same run directory. OS releases lock on
     # crashes; any orphan is terminated by the worker's parent-liveness check.
     lease = (manager.root / ".server.lock").open("a+b")
@@ -166,6 +168,11 @@ def make_server(root, port=8675, host="127.0.0.1"):
                 path = urlparse(self.path).path
                 if path == "/api/jobs":
                     return self.respond(manager.list())
+                if path == "/api/datasets":
+                    return self.respond(datasets.list())
+                match = re.fullmatch(r"/api/datasets/([a-f0-9]{32})", path)
+                if match:
+                    return self.respond(datasets.get(match[1]))
                 if path == "/api/presets":
                     import torch
                     return self.respond({"models": presets(), "cuda": torch.cuda.is_available(),
@@ -216,7 +223,8 @@ def make_server(root, port=8675, host="127.0.0.1"):
                         return
                     return self.respond(manager.get(job_id))
                 assets = {"/": ("index.html", "text/html"), "/app.js": ("app.js", "text/javascript"),
-                          "/style.css": ("style.css", "text/css")}
+                          "/style.css": ("style.css", "text/css"),
+                          "/datasets.js": ("datasets.js", "text/javascript")}
                 if path not in assets:
                     return self.respond({"error": "Not found"}, 404)
                 filename, mime = assets[path]
@@ -233,12 +241,31 @@ def make_server(root, port=8675, host="127.0.0.1"):
         def do_POST(self):
             try:
                 self.check_local()
+                match = re.fullmatch(r"/api/datasets/([a-f0-9]{32})/files/([^/]+)", self.path)
+                if match:
+                    if self.headers.get("Content-Type") != "application/octet-stream":
+                        raise ValueError("Expected application/octet-stream")
+                    self.connection.settimeout(120)
+                    self.close_connection = True
+                    return self.respond(datasets.upload(match[1], unquote(match[2]), self.rfile,
+                                                       int(self.headers.get("Content-Length", "0"))), 201)
                 if self.headers.get("Content-Type", "").split(";")[0] != "application/json":
                     raise ValueError("Expected application/json")
                 size = int(self.headers.get("Content-Length", "0"))
                 if not 0 < size <= 1_000_000:
                     raise ValueError("Invalid request size")
                 payload = json.loads(self.rfile.read(size))
+                if not isinstance(payload, dict):
+                    raise ValueError("Expected a JSON object")
+                if self.path == "/api/datasets":
+                    return self.respond(datasets.create(payload.get("name"), payload.get("spec")), 201)
+                match = re.fullmatch(r"/api/datasets/([a-f0-9]{32})/(update|finalize|split|inspect)", self.path)
+                if match:
+                    identifier, action = match.groups()
+                    if action == "inspect":
+                        return self.respond(datasets.inspect(identifier))
+                    method = {"update": datasets.update, "finalize": datasets.finalize, "split": datasets.split}[action]
+                    return self.respond(method(identifier, payload))
                 if self.path == "/api/preview":
                     return self.respond(inspect_data(normalize(payload)))
                 if self.path == "/api/jobs":
@@ -256,6 +283,7 @@ def make_server(root, port=8675, host="127.0.0.1"):
         lease.close()
         raise
     server.manager = manager
+    server.datasets = datasets
     server.lease = lease
     return server
 
