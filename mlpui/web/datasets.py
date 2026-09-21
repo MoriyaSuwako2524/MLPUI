@@ -2,6 +2,7 @@
 import copy
 from pathlib import Path
 import re
+import shutil
 import threading
 import time
 from uuid import uuid4
@@ -109,13 +110,31 @@ class DatasetManager:
                           key=lambda item: item["created"], reverse=True)
 
     @staticmethod
+    def tags(values):
+        if not isinstance(values, list) or len(values) > 20:
+            raise ValueError("最多允许 20 个标签")
+        result = []
+        for value in values:
+            if not isinstance(value, str) or not 1 <= len(value.strip()) <= 40:
+                raise ValueError("每个标签须为 1–40 个字符")
+            value = value.strip()
+            if value.casefold() not in {v.casefold() for v in result}:
+                result.append(value)
+        return result
+
+    @staticmethod
     def name(value):
         if not isinstance(value, str) or not 1 <= len(value.strip()) <= 100:
             raise ValueError("数据集名称须为 1–100 个字符")
         return value.strip()
 
-    def create(self, name, spec=None):
+    def create(self, name, spec=None, tags=None):
+        with self.lock:
+            return self._create(name, spec, tags)
+
+    def _create(self, name, spec, tags):
         name = self.name(name)
+        tags = self.tags(tags if tags is not None else [])
         if spec is not None:
             spec = checked_spec(spec)
             _, summary = inspect_spec(spec)
@@ -123,7 +142,7 @@ class DatasetManager:
             identifier = uuid4().hex
             folder = self.folder(identifier)
             folder.mkdir()
-            record = dict(id=identifier, name=name, created=time.time(), archived=False,
+            record = dict(id=identifier, name=name, tags=tags, created=time.time(), archived=False,
                           status="ready" if spec is not None else "uploading", source="existing" if spec else "upload")
             if spec is not None:
                 record.update(spec=spec, summary=summary)
@@ -188,12 +207,14 @@ class DatasetManager:
             return record
 
     def update(self, identifier, changes):
-        if not isinstance(changes, dict) or changes.keys() - {"name", "archived"}:
-            raise ValueError("只支持修改名称或归档状态")
+        if not isinstance(changes, dict) or changes.keys() - {"name", "archived", "tags"}:
+            raise ValueError("只支持修改名称、标签或归档状态")
         with self.lock:
             record = self.get(identifier)
             if "name" in changes:
                 record["name"] = self.name(changes["name"])
+            if "tags" in changes:
+                record["tags"] = self.tags(changes["tags"])
             if "archived" in changes:
                 if not isinstance(changes["archived"], bool):
                     raise ValueError("archived must be boolean")
@@ -202,6 +223,10 @@ class DatasetManager:
             return record
 
     def inspect(self, identifier):
+        with self.lock:
+            return self._inspect(identifier)
+
+    def _inspect(self, identifier):
         record = self.get(identifier)
         if record["status"] != "ready":
             raise ValueError("请先完成上传和检查")
@@ -212,7 +237,53 @@ class DatasetManager:
             write_json(self.folder(identifier) / "dataset.json", record)
         return summary
 
+    def delete(self, identifier, options, *, job_specs=()):
+        if not isinstance(options, dict) or set(options) - {"delete_files"} or not isinstance(options.get("delete_files", False), bool):
+            raise ValueError("delete_files must be boolean")
+        with self.lock:
+            record = self.get(identifier)
+            if options.get("delete_files", False):
+                if record["source"] == "upload":
+                    target = self.folder(identifier) / "data"
+                elif record["source"] == "split":
+                    if not re.fullmatch(r"[a-f0-9]{32}", record["split_id"]) or record["split_role"] not in {"train", "validation", "test"}:
+                        raise ValueError("Invalid managed dataset path")
+                    target = self.root / ("split-" + record["split_id"]) / record["split_role"]
+                else:
+                    raise ValueError("已有目录只允许删除登记记录，不能删除源文件")
+                resolved = target.resolve()
+                if resolved != target or not resolved.is_relative_to(self.root) or resolved == self.root:
+                    raise ValueError("拒绝删除管理目录以外的文件或链接")
+                if record.get("spec") and Path(record["spec"]["directory"]).resolve() != resolved:
+                    raise ValueError("Dataset path does not match owned directory")
+
+                def references(spec):
+                    directory = Path(spec["directory"]).resolve()
+                    paths = [directory]
+                    for filename in spec.get("files", {}).values():
+                        paths.extend((directory / filename.format(shard=s)).resolve() for s in spec.get("shards", [""]))
+                    return any(p.is_relative_to(resolved) or resolved.is_relative_to(p) for p in paths)
+
+                if any(references(spec) for spec in job_specs):
+                    raise ValueError("文件被训练或评估任务引用；可以仅删除登记记录")
+                if any(other["id"] != identifier and other.get("spec") and references(other["spec"]) for other in self.list()):
+                    raise ValueError("文件被其他数据集引用；可以仅删除登记记录")
+                if target.exists():
+                    # Check every resolved descendant before recursive deletion on Windows.
+                    if any(not p.resolve().is_relative_to(resolved) or p.is_symlink() for p in target.rglob("*")):
+                        raise ValueError("数据目录包含链接，拒绝递归删除")
+                    shutil.rmtree(target)
+            # Keep a provenance tombstone while removing the entry from the catalog.
+            record.update(deleted=time.time(), files_deleted=options.get("delete_files", False))
+            write_json(self.folder(identifier) / "deleted.json", record)
+            (self.folder(identifier) / "dataset.json").unlink()
+            return {"id": identifier, "deleted": True, "files_deleted": record["files_deleted"]}
+
     def split(self, identifier, options):
+        with self.lock:
+            return self._split(identifier, options)
+
+    def _split(self, identifier, options):
         source = self.get(identifier)
         if source["status"] != "ready" or source["archived"]:
             raise ValueError("请选择可用数据集")
@@ -247,6 +318,7 @@ class DatasetManager:
             np.save(directory / f"{label}_indices.npy", selected)
             _, child_summary = inspect_spec(spec)
             records.append(dict(id=uuid4().hex, name=f"{name} · {label}", created=time.time(),
+                                tags=list(source.get("tags", [])),
                                 archived=False, status="ready", source="split", spec=spec, summary=child_summary,
                                 parent_id=identifier, split_id=split_id, split_role=label))
         manifest = dict(id=split_id, parent_id=identifier, source_spec=source["spec"], samples=len(data),

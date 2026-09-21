@@ -147,3 +147,69 @@ def test_dataset_http_lifecycle(tmp_path):
         server.manager.close()
         server.server_close()
         server.lease.close()
+
+
+def test_tags_validation_persistence_and_split_inheritance(tmp_path):
+    manager = DatasetManager(tmp_path / 'catalog')
+    record = manager.create('tagged', dict(directory=str(source_data(tmp_path / 'source'))),
+                            tags=[' DFT ', 'dft', '反应'])
+    assert record['tags'] == ['DFT', '反应']
+    children = manager.split(record['id'], dict(name='split'))['datasets']
+    assert all(child['tags'] == ['DFT', '反应'] for child in children)
+    manager.update(record['id'], dict(tags=['v2']))
+    assert DatasetManager(manager.root).get(record['id'])['tags'] == ['v2']
+    for tags in ['bad', [''], ['x' * 41], [3], ['x'] * 21]:
+        with pytest.raises(ValueError):
+            manager.update(record['id'], dict(tags=tags))
+    manager.update(record['id'], dict(tags=[]))
+    assert manager.get(record['id'])['tags'] == []
+
+
+def test_delete_existing_record_keeps_original_files(tmp_path):
+    manager = DatasetManager(tmp_path / 'catalog')
+    path = source_data(tmp_path / 'source')
+    record = manager.create('source', dict(directory=str(path)))
+    with pytest.raises(ValueError, match='源文件'):
+        manager.delete(record['id'], dict(delete_files=True))
+    manager.delete(record['id'], {})
+    assert not manager.list()
+    assert (path / 'pos.npy').exists()
+    assert (manager.folder(record['id']) / 'deleted.json').exists()
+
+
+def test_delete_managed_files_reference_guards_and_siblings(tmp_path):
+    manager = DatasetManager(tmp_path / 'catalog')
+    source = manager.create('source', dict(directory=str(source_data(tmp_path / 'source'))))
+    children = manager.split(source['id'], dict(name='split'))['datasets']
+    child = children[0]
+    from pathlib import Path
+    path = Path(child['spec']['directory'])
+    with pytest.raises(ValueError, match='任务引用'):
+        manager.delete(child['id'], dict(delete_files=True), job_specs=[child['spec']])
+    # Explicit file mappings outside the referencing directory also count.
+    with pytest.raises(ValueError, match='任务引用'):
+        manager.delete(child['id'], dict(delete_files=True), job_specs=[dict(directory=str(tmp_path / 'elsewhere'), files={'pos': str(path / 'pos.npy')})])
+    alias = manager.create('alias', child['spec'])
+    with pytest.raises(ValueError, match='其他数据集'):
+        manager.delete(child['id'], dict(delete_files=True))
+    manager.delete(alias['id'], {})
+    manager.delete(child['id'], dict(delete_files=True))
+    assert not path.exists()
+    assert all(Path(d['spec']['directory']).exists() for d in children[1:])
+    assert (path.parent / 'split.json').exists()
+
+
+def test_delete_upload_draft_and_reject_tampered_path(tmp_path):
+    manager = DatasetManager(tmp_path / 'catalog')
+    draft = manager.create('draft')
+    folder = manager.folder(draft['id']) / 'data'
+    (folder / 'leftover.part').write_bytes(b'partial')
+    manager.delete(draft['id'], dict(delete_files=True))
+    assert not folder.exists()
+    source = manager.create('source', dict(directory=str(source_data(tmp_path / 'source'))))
+    child = manager.split(source['id'], dict(name='split'))['datasets'][0]
+    from mlpui.web.worker import write_json
+    child['spec']['directory'] = str(tmp_path)
+    write_json(manager.folder(child['id']) / 'dataset.json', child)
+    with pytest.raises(ValueError, match='owned directory'):
+        manager.delete(child['id'], dict(delete_files=True))

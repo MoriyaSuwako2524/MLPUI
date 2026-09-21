@@ -271,6 +271,13 @@ The **数据集** page provides a persistent NPY dataset library:
   numeric `.npy` files from the browser (20 GiB per file; streamed to disk).
 - Inspect sample counts, fields, shapes, dtypes and file sizes; search, rename,
   recheck, archive and restore records. Archiving retains files and existing tasks.
+- Add or edit up to 20 tags per dataset, filter by tag or untagged records, and
+  search tags alongside names. Generated splits inherit their parent's tags.
+- Delete a catalog record from its management panel. Existing server directories
+  always retain their files. For uploads and generated subsets, an explicit option
+  also deletes that record's owned data directory; files referenced by any task or
+  another catalog entry cannot be deleted. Split siblings and provenance metadata
+  are retained. File deletion is permanent; record-only deletion keeps the files.
 - Standard names are discovered automatically. QM prefixes and `{shard}` groups
   use the same explicit file mappings and unit conversions as training.
 - Split an existing dataset using train/validation/test ratios and a random seed,

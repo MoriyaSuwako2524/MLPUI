@@ -2,6 +2,10 @@ let datasetRecords=[], selectedDataset=null, datasetBusy=false, uploadDraft=null
 const readyDatasets=()=>datasetRecords.filter(d=>d.status==='ready'&&!d.archived);
 async function loadDatasets(){
   datasetRecords=await api('/api/datasets');
+  const previousTag=text('dataset-tag-filter');
+  const tags=[...new Set(datasetRecords.flatMap(d=>d.tags||[]))].sort((a,b)=>a.localeCompare(b));
+  $('dataset-tag-filter').innerHTML='<option value="">全部标签</option><option value="__untagged__">未分类</option>'+tags.map(t=>`<option value="tag:${escapeHTML(t)}">${escapeHTML(t)}</option>`).join('');
+  if([...$('dataset-tag-filter').options].some(o=>o.value===previousTag))$('dataset-tag-filter').value=previousTag;
   for(const split of ['train','validation','test']){
     const select=$('managed-'+split), previous=select.value;
     select.innerHTML=`<option value="">${split==='train'?'手动填写路径和文件映射':'使用下方手动配置 / 不使用'}</option>`+
@@ -33,11 +37,14 @@ function setManagedFields(){
 }
 function renderDatasets(){
   const query=text('dataset-search').toLowerCase();
+  const tag=text('dataset-tag-filter');
   const records=datasetRecords.filter(d=>($('dataset-show-archived').checked||!d.archived)&&
-    `${d.name} ${d.spec?.directory||''} ${d.summary?.fields.join(' ')||''}`.toLowerCase().includes(query));
+    (!tag||(tag==='__untagged__'?!(d.tags||[]).length:(d.tags||[]).includes(tag.slice(4))))&&
+    `${d.name} ${(d.tags||[]).join(' ')} ${d.spec?.directory||''} ${d.summary?.fields.join(' ')||''}`.toLowerCase().includes(query));
   $('dataset-list').innerHTML=records.length?'<div class="dataset-cards">'+records.map(d=>`<article class="panel dataset-card">
     <div class="dataset-card-title"><h2>${escapeHTML(d.name)}</h2><span class="badge ${d.status==='ready'?'completed':''}">${d.archived?'已归档':d.status==='ready'?'可用':'上传草稿'}</span></div>
     <strong>${d.summary?`${d.summary.samples.toLocaleString()} 个结构`:'等待上传和检查'}</strong>
+    <div class="dataset-tags">${(d.tags||[]).map(t=>`<span class="badge">${escapeHTML(t)}</span>`).join(' ')||'<span class="muted">未分类</span>'}</div>
     <p>${escapeHTML(d.summary?.fields.join(' · ')||'NPY')}</p><p class="footnote">${escapeHTML(d.spec?.directory||'本机上传')}</p>
     <div class="preview-row"><button data-dataset-action="detail" data-id="${d.id}">管理</button>${d.status==='ready'&&!d.archived?`<button data-dataset-action="use" data-id="${d.id}">用于任务 →</button>`:''}</div></article>`).join('')+'</div>':'<div class="panel empty"><h2>暂无匹配的数据集</h2><p>添加服务器目录或上传本机的 npy 文件。</p></div>';
 }
@@ -46,6 +53,11 @@ function showDataset(id){
   const d=selectedDataset;
   $('dataset-detail').hidden=false;
   $('dataset-detail-title').textContent=d.name; $('dataset-rename').value=d.name;
+  $('dataset-tags-edit').value=(d.tags||[]).join(', ');
+  $('dataset-delete-panel').open=false;$('dataset-delete-files').checked=false;
+  $('dataset-delete-files').disabled=d.source==='existing';
+  $('dataset-delete-files').closest('label').hidden=d.source==='existing';
+  $('dataset-delete-info').textContent=`将删除「${d.name}」${d.source==='existing'?'的登记记录；服务器源文件始终保留。':'。可选择仅移除记录，或连同托管文件一起删除。'}`;
   $('dataset-detail-info').textContent=`${d.spec?.directory||'上传草稿'}${d.parent_id?' · 源数据集 '+d.parent_id:''}`;
   $('dataset-archive').textContent=d.archived?'恢复到列表':'归档';
   $('dataset-inspect').disabled=d.status!=='ready';
@@ -95,7 +107,7 @@ $('dataset-layout').addEventListener('change',()=>{
 });
 $('dataset-form').addEventListener('submit',event=>{
   event.preventDefault();datasetOperation(async()=>{
-    const spec=datasetSpec(),name=text('dataset-name');let record;
+    const spec=datasetSpec(),name=text('dataset-name'),tags=parseDatasetTags('dataset-tags-new');let record;
     if(text('dataset-source')==='upload'){
       const files=[...$('dataset-files').files];
       if(!files.length)throw new Error('请选择 npy 文件');
@@ -103,7 +115,7 @@ $('dataset-form').addEventListener('submit',event=>{
       // Retain the draft after a failed validation so mapping can be corrected.
       const signature=JSON.stringify(files.map(f=>[f.name,f.size,f.lastModified]));
       if(!uploadDraft||uploadDraft.signature!==signature){
-        record=await api('/api/datasets',{name});uploadDraft={id:record.id,signature,uploaded:new Set()};
+        record=await api('/api/datasets',{name,tags});uploadDraft={id:record.id,signature,uploaded:new Set()};
       }
       for(let i=0;i<files.length;i++){
         const file=files[i]; if(uploadDraft.uploaded.has(file.name))continue;
@@ -116,7 +128,7 @@ $('dataset-form').addEventListener('submit',event=>{
       record=await api(`/api/datasets/${uploadDraft.id}/finalize`,spec);uploadDraft=null;
     }else{
       $('dataset-progress').textContent='正在检查数据…';
-      record=await api('/api/datasets',{name,spec});
+      record=await api('/api/datasets',{name,spec,tags});
     }
     $('dataset-progress').textContent=`已添加 ${record.summary.samples} 个结构`;
     selectedDataset=record;
@@ -129,6 +141,22 @@ $('dataset-list').addEventListener('click',event=>{
 });
 $('dataset-search').addEventListener('input',renderDatasets);
 $('dataset-show-archived').addEventListener('change',renderDatasets);
+$('dataset-tag-filter').addEventListener('change',renderDatasets);
+function parseDatasetTags(id){return text(id).split(/[,，]/).map(v=>v.trim()).filter(Boolean);}
+$('dataset-tags-save').addEventListener('click',()=>datasetOperation(async()=>{
+  await api(`/api/datasets/${selectedDataset.id}/update`,{tags:parseDatasetTags('dataset-tags-edit')});
+}));
+$('dataset-delete-confirm').addEventListener('click',()=>datasetOperation(async()=>{
+  const id=selectedDataset.id;
+  await api(`/api/datasets/${id}/delete`,{delete_files:$('dataset-delete-files').checked});
+  if(uploadDraft?.id===id)uploadDraft=null;
+  selectedDataset=null;$('dataset-detail').hidden=true;
+  for(const split of ['train','validation','test']) if(text('managed-'+split)===id){
+    $('managed-'+split).value='';
+    $(split==='train'?'directory':split+'-directory').value='';
+    $(split==='train'?'shards':split+'-shards').value='';
+  }
+}));
 $('dataset-rename-save').addEventListener('click',()=>datasetOperation(async()=>{
   await api(`/api/datasets/${selectedDataset.id}/update`,{name:text('dataset-rename')});
 }));

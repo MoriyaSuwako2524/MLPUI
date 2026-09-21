@@ -258,10 +258,17 @@ def make_server(root, port=8675, host="127.0.0.1"):
                 if not isinstance(payload, dict):
                     raise ValueError("Expected a JSON object")
                 if self.path == "/api/datasets":
-                    return self.respond(datasets.create(payload.get("name"), payload.get("spec")), 201)
-                match = re.fullmatch(r"/api/datasets/([a-f0-9]{32})/(update|finalize|split|inspect)", self.path)
+                    return self.respond(datasets.create(payload.get("name"), payload.get("spec"), payload.get("tags")), 201)
+                match = re.fullmatch(r"/api/datasets/([a-f0-9]{32})/(update|finalize|split|inspect|delete)", self.path)
                 if match:
                     identifier, action = match.groups()
+                    if action == "delete":
+                        with manager.lock:
+                            specs = []
+                            for job in manager.list():
+                                config = read_json(manager.folder(job["id"]) / "config.json")
+                                specs.extend(config[key] for key in ("train", "validation", "test", "evaluation") if config.get(key))
+                            return self.respond(datasets.delete(identifier, payload, job_specs=specs))
                     if action == "inspect":
                         return self.respond(datasets.inspect(identifier))
                     method = {"update": datasets.update, "finalize": datasets.finalize, "split": datasets.split}[action]
@@ -269,7 +276,8 @@ def make_server(root, port=8675, host="127.0.0.1"):
                 if self.path == "/api/preview":
                     return self.respond(inspect_data(normalize(payload)))
                 if self.path == "/api/jobs":
-                    return self.respond(manager.start(payload), 201)
+                    with manager.lock:
+                        return self.respond(manager.start(payload), 201)
                 match = re.fullmatch(r"/api/jobs/([a-f0-9]{32})/stop", self.path)
                 if match:
                     return self.respond(manager.stop(match[1]))

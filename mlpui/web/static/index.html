@@ -23,7 +23,7 @@
     <div class="page-title"><div><div class="eyebrow">DATA LIBRARY</div><h1>数据集</h1><p>登记、上传和划分分子数据，在任务中重复使用。</p></div><button id="dataset-new" class="primary">＋ 添加数据集</button></div>
     <div class="panel form-panel" id="dataset-create-panel" hidden>
       <h2>添加数据集</h2><form id="dataset-form"><div class="grid two">
-        <label>名称<input id="dataset-name" required maxlength="100"></label>
+        <label>名称<input id="dataset-name" required maxlength="100"></label><label>标签<input id="dataset-tags-new" placeholder="例如 CM, DFT, v1；逗号分隔"></label>
         <label>来源<select id="dataset-source"><option value="existing">服务器已有目录</option><option value="upload">从本机上传 NPY 文件</option></select></label>
         <label class="wide" id="dataset-directory-label">服务器目录<input id="dataset-directory" placeholder="/scratch/.../npys" required></label>
         <label class="wide" id="dataset-upload-label" hidden>选择 NPY 文件<input id="dataset-files" type="file" accept=".npy" multiple><small>可一次选择多个文件，保留文件名；单文件最大 20 GiB，上传到 WebUI 所在机器。</small></label>
@@ -38,11 +38,13 @@
       <div class="preview-row"><button id="dataset-save" class="primary" type="submit">检查并添加</button><button id="dataset-cancel" type="button">收起</button><span id="dataset-progress" role="status"></span></div>
       </form>
     </div>
-    <div class="dataset-toolbar"><label>搜索<input id="dataset-search" placeholder="名称、字段或路径"></label><label class="check"><input type="checkbox" id="dataset-show-archived">显示归档</label></div>
+    <div class="dataset-toolbar"><label>搜索<input id="dataset-search" placeholder="名称、字段或路径"></label><label>按标签筛选<select id="dataset-tag-filter"><option value="">全部标签</option></select></label><label class="check"><input type="checkbox" id="dataset-show-archived">显示归档</label></div>
     <div id="dataset-list"></div>
     <div class="panel form-panel" id="dataset-detail" hidden>
       <h2 id="dataset-detail-title"></h2><p id="dataset-detail-info" class="footnote"></p>
       <div class="preview-row"><input id="dataset-rename" aria-label="数据集新名称" maxlength="100"><button id="dataset-rename-save">保存名称</button><button id="dataset-archive">归档</button><button id="dataset-inspect">重新检查</button></div>
+      <div class="preview-row"><label>标签<input id="dataset-tags-edit" placeholder="逗号分隔；留空清除"></label><button id="dataset-tags-save">保存标签</button></div>
+      <details id="dataset-delete-panel"><summary>删除数据集</summary><p id="dataset-delete-info" class="hint"></p><label class="check"><input type="checkbox" id="dataset-delete-files">同时永久删除此数据集的托管 NPY 文件</label><p class="hint">默认只删除库中的记录。文件删除不可撤销；任务或其他数据集引用的文件不能删除。</p><button id="dataset-delete-confirm" class="danger" type="button">确认删除此数据集</button></details>
       <div id="dataset-file-list" class="table-wrap"></div>
       <p class="hint">归档仅隐藏目录记录，保留原文件和已创建的任务。</p>
       <details id="dataset-split-details"><summary>基于此数据集重新划分</summary>
