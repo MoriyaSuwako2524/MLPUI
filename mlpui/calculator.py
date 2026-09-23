@@ -364,7 +364,8 @@ class CalculatorBuilder:
 
         device = self._resolve_device()
         family = self._detect_model_family()
-        if family in ("torchmdnet", "newtonnet"):
+        from mlpui.backends import registered_backends
+        if family in {backend.name for backend in registered_backends()}:
             from mlpui.external_calculator import build_external_calculator
             return build_external_calculator(self, family, device)
         input_adapter = self._resolve_input_adapter()
@@ -411,11 +412,14 @@ class CalculatorBuilder:
         backbone = self._get_backbone()
         family = getattr(backbone, "mlpui_family", None)
         if family is not None:
-            return family
-        if type(backbone).__module__.startswith(("newtonnet.", "mlpui.models.newtonnet.")):
-            return "newtonnet"
-        if type(backbone).__module__.startswith(("torchmdnet.", "mlpui.models.torchmdnet.")):
-            return "torchmdnet"
+            from mlpui.backends import get_backend
+            if family in ("uma", "simple"):
+                return family
+            return get_backend(family).name
+        from mlpui.backends import find_backend
+        backend = find_backend(backbone)
+        if backend is not None:
+            return backend.name
         cls_name = type(backbone).__name__.lower()
         if "escnmd" in cls_name or "uma" in cls_name:
             return "uma"

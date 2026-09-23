@@ -1,4 +1,4 @@
-"""Unified .npy training interface for bundled TorchMD-Net/NewtonNet models."""
+"""Unified .npy training interface for registered model backends."""
 from dataclasses import dataclass, field
 from pathlib import Path
 import copy
@@ -12,8 +12,8 @@ import numpy as np
 import torch
 
 from mlpui.data import NpyDataset, NpyShards
-from mlpui.external_calculator import AtomicInputAdapter, AtomicOutputAdapter
 from mlpui.external_models import _config_dict, load_external_checkpoint
+from mlpui.backends import get_backend
 
 
 class TrainingStopped(Exception):
@@ -26,22 +26,7 @@ def configure_charge_head(family, model_config, targets):
     Existing heads and their order are preserved. A checkpoint must already
     contain these learned parameters; loading remains strict.
     """
-    model_config = copy.deepcopy(model_config)
-    config = model_config.get("model", model_config) if family == "newtonnet" else model_config
-    if not isinstance(config.get("charge_constraint", False), bool):
-        raise ValueError("charge_constraint must be boolean")
-    if "charges" in targets:
-        if family == "newtonnet":
-            config = model_config.get("model", model_config)
-            outputs = list(config.get("output_properties", []))
-            if "charge" not in outputs:
-                outputs.append("charge")
-            config["output_properties"] = outputs
-        else:
-            heads = dict(model_config.get("pred_dict", {"y": 1., "neg_dy": 1.}))
-            heads.setdefault("charge", 1.)
-            model_config["pred_dict"] = heads
-    return model_config
+    return get_backend(family).configure_targets(model_config, targets)
 
 
 @dataclass
@@ -97,40 +82,23 @@ class Trainer:
 
     def __init__(self, family, model_config, config=None, *, checkpoint=None,
                  trusted_checkpoint=False):
-        self.family = {"torchmd-net": "torchmdnet", "tensornet": "torchmdnet"}.get(family, family)
-        if self.family not in ("torchmdnet", "newtonnet"):
-            raise ValueError("Training currently supports torchmdnet and newtonnet")
+        self.backend = get_backend(family)
+        self.family = self.backend.name
         self.config = config or TrainingConfig()
-        self.model_config = _config_dict(model_config)
-        self.model_config = configure_charge_head(self.family, self.model_config, self.config.loss_weights)
-        if self.family == "newtonnet" and isinstance(self.model_config.get("model"), dict):
-            self.model_config = self.model_config["model"]
+        self.model_config = self.backend.training_config(
+            _config_dict(model_config), self.config.loss_weights, self.config.dtype)
         torch.manual_seed(self.config.seed)
-        if self.family == "torchmdnet":
-            self.model_config["precision"] = 64 if self.config.dtype == torch.float64 else 32
-            if "forces" in self.config.loss_weights:
-                self.model_config["derivative"] = True
         if checkpoint is not None:
             self.model = load_external_checkpoint(
                 checkpoint, family=self.family, model_config=self.model_config,
                 device=self.config.device, dtype=self.config.dtype,
                 trusted_checkpoint=trusted_checkpoint).model
-        elif self.family == "torchmdnet":
-            from mlpui.models.torchmdnet.models.model import create_model
-            self.model = create_model(copy.deepcopy(self.model_config))
         else:
-            from mlpui.models.newtonnet.models.newtonnet import NewtonNet
-            self.model = NewtonNet(**self.model_config)
+            self.model = self.backend.build_model(self.model_config)
         self.model.to(device=self.config.device, dtype=self.config.dtype)
         if getattr(self.model, "charge_constraint", False):
             self.model_config["charge_constraint"] = True
-        if self.family == "torchmdnet":
-            if self.model_config.get("output_model", "Scalar") != "Scalar":
-                raise ValueError("Training requires a Scalar primary energy head")
-            if "forces" in self.config.loss_weights:
-                self.model.derivative = True
-        elif set(self.model.output_properties).intersection({"hessian", "bec"}):
-            raise ValueError("Hessian/BEC heads require specialized training")
+        self.backend.validate_training(self.model, self.model_config, self.config.loss_weights)
         self.optimizer = torch.optim.Adam(self.model.parameters(), lr=self.config.learning_rate)
         self.history = []
 
@@ -138,24 +106,15 @@ class Trainer:
         atoms = NpyDataset.atoms(sample)
         if "stress" in self.config.loss_weights and not np.all(atoms.pbc):
             raise ValueError("Stress training requires periodic structures")
-        inputs = AtomicInputAdapter(self.family,
-                                    charge=float(np.asarray(sample["charge"]).item()) if "charge" in sample else None,
-                                    spin=float(sample.get("spin", 0)),
-                                    require_charge=getattr(self.model, "charge_constraint", False)).convert(
-                                        atoms, self.config.device, self.config.dtype)
-        if self.family == "torchmdnet":
-            for module in self.model.modules():
-                if type(module).__name__ == "OptimizedDistance":
-                    module.use_periodic = inputs["box"] is not None
-        output = self.model(**inputs)
-        if isinstance(output, tuple):
-            output = dict(zip(("energy", "forces"), output))
-        elif not isinstance(output, dict):
-            output = vars(output)
+        inputs = self.backend.prepare_inputs(
+            atoms, self.config.device, self.config.dtype, model=self.model,
+            charge=float(np.asarray(sample["charge"]).item()) if "charge" in sample else None,
+            spin=float(sample.get("spin", 0)),
+            require_charge=getattr(self.model, "charge_constraint", False))
+        output = self.backend.forward(self.model, inputs, self.config.loss_weights)
         errors = {}
         for prop in self.config.loss_weights:
-            prediction = next((output[k] for k in AtomicOutputAdapter.ALIASES[prop]
-                               if output.get(k) is not None), None)
+            prediction = output.get(prop)
             if prediction is None:
                 raise ValueError(f"Model does not produce training target {prop}")
             target = torch.as_tensor(sample[prop], device=self.config.device, dtype=self.config.dtype)
@@ -335,7 +294,9 @@ class Trainer:
         path.parent.mkdir(parents=True, exist_ok=True)
         temporary = path.with_name(path.name + "." + uuid4().hex + ".tmp")
         try:
-            torch.save({"model_config": self.model_config, "early_stopping": getattr(self, "early_stopping", None),
+            torch.save({"backend": self.family, "format_version": 1,
+                    "model_config_version": self.backend.config_version,
+                    "model_config": self.model_config, "early_stopping": getattr(self, "early_stopping", None),
                     "state_dict": {k: v.detach().cpu() for k, v in self.model.state_dict().items()},
                     "history": self.history, "epoch": len(self.history)}, temporary)
             for attempt in range(50):

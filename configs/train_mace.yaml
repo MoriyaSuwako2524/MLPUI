@@ -1,0 +1,41 @@
+# Adjust data paths, elements, reference energies and loss weights for your data.
+family: mace
+model_config:
+  source_version: "0.3.16"
+  atomic_numbers: [1, 6, 7, 8]
+  atomic_energies: {"1": 0.0, "6": 0.0, "7": 0.0, "8": 0.0}
+  r_max: 5.0
+  num_channels: 64
+  max_L: 1
+  max_ell: 3
+  num_interactions: 2
+  correlation: 3
+  charge_constraint: true
+training:
+  epochs: 100
+  batch_size: 4
+  learning_rate: 0.001
+  dtype: float64
+  device: cpu
+  loss_weights: {energy: 1.0, forces: 1.0, charges: 1.0}
+  save_interval: 10
+  max_checkpoints: 3
+train:
+  directory: ../data/train
+  files:
+    z: z.npy
+    pos: pos.npy
+    energy: energy.npy
+    forces: forces.npy
+    charges: charges.npy
+    charge: charge.npy
+validation:
+  directory: ../data/validation
+  files:
+    z: z.npy
+    pos: pos.npy
+    energy: energy.npy
+    forces: forces.npy
+    charges: charges.npy
+    charge: charge.npy
+output_dir: ../runs/mace

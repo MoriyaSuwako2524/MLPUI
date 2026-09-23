@@ -1,10 +1,15 @@
 # MLPUI
 
-Python interfaces for machine-learning interatomic potentials. UMA, NewtonNet
-and TorchMD-Net network implementations are included under `mlpui/models/`.
+Python interfaces for machine-learning interatomic potentials. UMA, NewtonNet,
+TorchMD-Net and MACE network implementations are included under `mlpui/models/`.
 The UMA implementation remains experimental. Bundled fork revisions, local
 changes and third-party licenses are recorded in
 [models/VENDORED_MODELS.md](mlpui/models/VENDORED_MODELS.md).
+
+NewtonNet, TorchMD-Net/TensorNet and MACE share an internal backend registry for
+training, checkpoint loading, ASE inference and WebUI configuration. See the
+[backend development guide](docs/model-backends.md) for the interface and
+checkpoint compatibility contract.
 
 ## Install
 
@@ -117,11 +122,25 @@ reference removed classes (e.g. `SumAggregator`) need their original backend
 revision for export and an explicit architecture migration; they are not
 silently treated as current NewtonNet models.
 
+## MACE
+
+The WebUI **MACE** option uses bundled MACE 0.3.16 (ScaleShiftMACE), with energy,
+gradient forces and an optional supervised atomic-charge head. Total-charge
+conservation, checkpoint continuation, evaluation and ASE inference use the same
+workflow as the other models. Update dependencies with `python -m pip install -e ".[test]"`;
+no separate `mace-torch` install or compiled extension is required.
+
+Set `atomic_numbers` and matching `atomic_energies` in the model configuration.
+The preset contains H/C/N/O/F/P/S/Cl with zero reference energies; references are
+not automatically fitted. The charge head is independent of the energy, and this
+backend does not import upstream foundation/PolarMACE checkpoints automatically.
+See the [MACE guide](docs/mace.md) and [training example](configs/train_mace.yaml).
+
 ## Units, cells, and patches
 
 ### Optional supervised atomic charges
 
-Both bundled NewtonNet and TensorNet support charge prediction. In the WebUI,
+Bundled NewtonNet, TensorNet and MACE support charge prediction. In the WebUI,
 enable **训练原子电荷预测**, set its loss weight, and map the charge label file.
 The standard filename is `charges.npy`; grouped QM data defaults to
 `qm_charge_{shard}.npy` and can be changed to your actual filename. Dense labels
@@ -182,7 +201,7 @@ For other units supply `energy_to_ev`, `length_to_angstrom`, and (if needed)
 `dipole_to_eangstrom`. Positions and cells are converted into model units;
 energy, forces, and stress are converted consistently back to ASE units.
 
-Both backends accept nonperiodic structures and fully periodic nonsingular
+All three registered backends accept nonperiodic structures and fully periodic nonsingular
 cells, subject to the backend's neighbor-list/cutoff constraints. Mixed PBC is
 rejected. NewtonNet's current minimum-image implementation should be used with
 orthorhombic cells; this interface rejects triclinic periodic cells rather than
@@ -213,7 +232,7 @@ no Node.js setup or separate frontend build is needed.
 
 The basic UI includes:
 
-- NewtonNet and TorchMD-Net/TensorNet presets, optional checkpoint fine-tuning,
+- NewtonNet, TorchMD-Net/TensorNet and MACE presets, optional checkpoint fine-tuning,
   and an expandable model-configuration editor.
 - Server-side `.npy` paths, standard/QM/custom file mappings, train/validation
   groups, gradient-to-force conversion, unit factors, and data validation.
@@ -343,7 +362,7 @@ state: use them as initial weights for a new task, not exact training resume.
 ## Training from NumPy files
 
 `mlpui.training.Trainer` provides one training interface for TorchMD-Net
-(including TensorNet) and NewtonNet. UMA training is not included. All training
+(including TensorNet), NewtonNet and MACE. UMA training is not included. All training
 and validation inputs and labels are numeric `.npy` files; pickled object arrays
 are rejected. Model architecture and run settings can be dictionaries or YAML.
 

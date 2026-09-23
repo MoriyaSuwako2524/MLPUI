@@ -18,7 +18,7 @@ import importlib.abc
 import sys
 class BlockExternal(importlib.abc.MetaPathFinder):
     def find_spec(self, fullname, path=None, target=None):
-        if fullname.split('.')[0] in {'newtonnet', 'torchmdnet', 'les'}:
+        if fullname.split('.')[0] in {'newtonnet', 'torchmdnet', 'mace', 'les'}:
             raise ImportError('External backend blocked: ' + fullname)
 sys.meta_path.insert(0, BlockExternal())
 from pathlib import Path
@@ -35,8 +35,10 @@ np.save(folder / 'forces.npy', np.zeros((1, 2, 3)))
 for family, config in presets().items():
     if family == 'newtonnet':
         config.update(n_features=8, n_basis=4, n_interactions=1)
-    else:
+    elif family == 'torchmdnet':
         config.update(embedding_dimension=8, num_rbf=4, num_layers=1)
+    else:
+        config.update(num_channels=4, max_ell=1, max_L=1, correlation=2, radial_MLP=[8])
     trainer = Trainer(family, config, TrainingConfig(epochs=1))
     assert type(trainer.model).__module__.startswith('mlpui.models.' + family)
     trainer.fit(folder, output_dir=folder / family)
@@ -44,7 +46,7 @@ for family, config in presets().items():
     atoms = NpyDataset.atoms(NpyDataset(folder)[0])
     atoms.calc = CalculatorBuilder.from_checkpoint(folder / family / 'model.pt', device='cpu').build()
     assert np.isfinite(atoms.get_forces()).all()
-assert not any(k.startswith(('newtonnet', 'torchmdnet', 'les')) for k in sys.modules)
+assert not any(k.startswith(('newtonnet', 'torchmdnet', 'mace', 'les')) for k in sys.modules)
 '''
     env = dict(os.environ, MLPUI_NEIGHBORS="python")
     result = subprocess.run([sys.executable, "-c", code, str(tmp_path)],

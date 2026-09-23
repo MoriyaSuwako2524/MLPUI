@@ -1,7 +1,8 @@
 const $ = id => document.getElementById(id);
 const active = new Set(['queued','starting','running','stopping']);
 const statuses = {queued:'排队中',cancelled:'已取消',starting:'准备中',running:'训练中',completed:'已完成',stopped:'已停止',failed:'失败',interrupted:'已中断'};
-let jobs = [], models = {}, current = null, pollBusy = false;
+let jobs = [], models = {}, backends = {}, current = null, pollBusy = false;
+const backendLabel = family => backends[family]?.label || family;
 const escapeHTML = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 function notify(message='') { $('notice').textContent=message; $('notice').hidden=!message; }
 async function api(path, payload) {
@@ -18,6 +19,7 @@ function payload() {
   const selected=datasetRecords.find(d=>d.id===text('managed-train'));
   const weights={};
   for(const key of ['energy','forces','charges']) {
+    if(!backends[text('family')]?.training_targets.includes(key)) continue;
     if(evaluating) {if($('eval-'+key).checked) weights[key]=1;}
     else if((key!=='charges'||$('train-charges').checked)&&number('weight-'+key)>0) weights[key]=number('weight-'+key);
   }
@@ -32,7 +34,8 @@ function payload() {
   if(!selected&&groups('shards').length) train.shards=groups('shards');
   let model;
   try { model=JSON.parse($('model-config').value); } catch { throw new Error('模型结构配置不是有效的 JSON'); }
-  const modelSettings=text('family')==='newtonnet'?(model.model||model):model;
+  const container=backends[text('family')]?.config_container;
+  const modelSettings=container&&model[container]&&typeof model[container]==='object'?model[container]:model;
   if($('charge-constraint').checked) {
     if(!('charges' in weights)) throw new Error('请同时启用原子电荷训练或评估');
     modelSettings.charge_constraint=true;
@@ -96,13 +99,13 @@ function renderJobs() {
     $('job-list').innerHTML='<div class="empty"><div class="empty-icon">▦</div><h2>开始你的第一个任务</h2><p>连接 .npy 数据，配置模型。每次实验都有清晰的记录。</p><a class="button primary" href="#new">＋ 创建任务</a></div>';
     return;
   }
-  $('job-list').innerHTML='<div class="table-wrap"><table><thead><tr><th>任务</th><th>模型</th><th>状态</th><th>进度</th><th>创建时间</th></tr></thead><tbody>'+jobs.map(j=>`<tr><td><a href="#job/${j.id}">${escapeHTML(j.name)}</a><small>${j.task_type==='evaluation'?'评估':'训练'} · ${j.id.slice(0,8)} · ${escapeHTML(j.assigned_device||j.requested_device||'cpu')}${j.status==='queued'?' · 等待中':''}</small></td><td>${j.family==='newtonnet'?'NewtonNet':'TorchMD-Net'}</td><td><span class="badge ${escapeHTML(j.status)}">${j.stop_requested&&active.has(j.status)?'正在停止':(j.task_type==='evaluation'&&j.status==='running'?'评估中':statuses[j.status])||escapeHTML(j.status)}</span></td><td>${j.task_type==='evaluation'?`${j.completed||0} / ${j.summary.evaluation.samples} 结构`:`${j.history.length} / ${j.epochs} epochs`}</td><td>${escapeHTML(new Date(j.created*1000).toLocaleString())}</td></tr>`).join('')+'</tbody></table></div>';
+  $('job-list').innerHTML='<div class="table-wrap"><table><thead><tr><th>任务</th><th>模型</th><th>状态</th><th>进度</th><th>创建时间</th></tr></thead><tbody>'+jobs.map(j=>`<tr><td><a href="#job/${j.id}">${escapeHTML(j.name)}</a><small>${j.task_type==='evaluation'?'评估':'训练'} · ${j.id.slice(0,8)} · ${escapeHTML(j.assigned_device||j.requested_device||'cpu')}${j.status==='queued'?' · 等待中':''}</small></td><td>${escapeHTML(backendLabel(j.family))}</td><td><span class="badge ${escapeHTML(j.status)}">${j.stop_requested&&active.has(j.status)?'正在停止':(j.task_type==='evaluation'&&j.status==='running'?'评估中':statuses[j.status])||escapeHTML(j.status)}</span></td><td>${j.task_type==='evaluation'?`${j.completed||0} / ${j.summary.evaluation.samples} 结构`:`${j.history.length} / ${j.epochs} epochs`}</td><td>${escapeHTML(new Date(j.created*1000).toLocaleString())}</td></tr>`).join('')+'</tbody></table></div>';
 }
 function renderDetail(job) {
   current=job;
   const evaluating=job.task_type==='evaluation';
   $('detail-name').textContent=job.name;
-  $('detail-meta').textContent=`${job.family==='newtonnet'?'NewtonNet':'TorchMD-Net'} · ${(job.summary.evaluation||job.summary.train).samples} 个${evaluating?'评估':'训练'}结构 · ${job.id.slice(0,8)}`;
+  $('detail-meta').textContent=`${backendLabel(job.family)} · ${(job.summary.evaluation||job.summary.train).samples} 个${evaluating?'评估':'训练'}结构 · ${job.id.slice(0,8)}`;
   $('detail-status').className='badge '+job.status;
   $('detail-status').textContent=job.stop_requested&&active.has(job.status)?'正在停止':statuses[job.status];
   const partial=job.phase==='training'?(job.completed||0)/(job.total||1):['validation','test'].includes(job.phase)?1:0;
@@ -180,7 +183,20 @@ async function refresh() {
   } catch(error) { $('connection').textContent='连接或任务读取异常'; notify(error.message); }
   finally { pollBusy=false; }
 }
-$('family').addEventListener('change',()=>{$('model-config').value=JSON.stringify(models[text('family')],null,2);});
+$('family').addEventListener('change',()=>{$('model-config').value=JSON.stringify(models[text('family')],null,2);updateBackendTargets();});
+function updateBackendTargets() {
+  const targets=backends[text('family')]?.training_targets||[];
+  $('model-config-hint').textContent=backends[text('family')]?.config_hint||'从头训练可用默认值；继续训练时需与原模型结构一致。';
+  const evaluating=text('task-type')==='evaluation';
+  for(const key of ['energy','forces','charges']) {
+    const supported=targets.includes(key);
+    $('eval-'+key).disabled=!supported;
+    $('weight-'+key).disabled=evaluating||!supported||(key==='charges'&&!$('train-charges').checked);
+  }
+  $('train-charges').disabled=evaluating||!targets.includes('charges');
+  $('charge-constraint').disabled=!targets.includes('charges');
+  if(!targets.includes('charges')) $('charge-constraint').checked=false;
+}
 function updateTaskType() {
   const evaluating=text('task-type')==='evaluation';
   updateTrainingMode();
@@ -194,7 +210,7 @@ function updateTaskType() {
   for(const split of ['validation','test']) $('managed-'+split).closest('label').hidden=evaluating;
   for(const id of ['early-stopping','early-monitor','early-patience','early-min-delta']) $(id).closest('label').hidden=evaluating;
   updateEarlyStopping();
-  $('weight-charges').disabled=evaluating||!$('train-charges').checked;
+  updateBackendTargets();
   $('new-view').querySelector('h1').textContent=evaluating?'创建评估任务':'创建训练任务';
   $('new-view').querySelector('.page-title p').textContent=evaluating?'选择已有模型和带标签的 npy 数据，计算误差。模型结构配置须与原模型一致。':'选择模型，连接 NumPy 数据，然后开始训练。';
   $('preview-result').textContent='检查文件、数组形状与标签。';
@@ -217,7 +233,7 @@ function updateEarlyStopping(){
   for(const id of ['early-monitor','early-patience','early-min-delta']) $(id).disabled=evaluating||!$('early-stopping').checked;
 }
 $('early-stopping').addEventListener('change',updateEarlyStopping);
-$('train-charges').addEventListener('change',()=>{$('weight-charges').disabled=!$('train-charges').checked;});
+$('train-charges').addEventListener('change',updateBackendTargets);
 $('layout').addEventListener('change',()=>{
   const standard=text('layout')==='standard';
   if(text('layout')==='custom'){$('file-details').open=true;return;}
@@ -246,7 +262,9 @@ $('metric').addEventListener('change',drawChart);
 window.addEventListener('hashchange',route);
 async function init(){
   $('start').disabled=true;
-  try{const config=await api('/api/presets');models=config.models;$('model-config').value=JSON.stringify(models.newtonnet,null,2);$('runs-root').textContent='输出位置 · '+config.root;
+  try{const config=await api('/api/presets');models=config.models;backends=config.backends;
+    $('family').replaceChildren(...Object.keys(models).map(name=>new Option(backendLabel(name),name)));
+    $('model-config').value=JSON.stringify(models[text('family')],null,2);$('runs-root').textContent='输出位置 · '+config.root;
     const gpu=$('device').querySelector('[value="cuda"]');gpu.disabled=!config.cuda;if(!config.cuda)gpu.textContent='GPU · 未检测到 CUDA';$('start').disabled=false;
   }catch(error){notify(error.message);}
   updateTaskType();route();setInterval(refresh,2000);

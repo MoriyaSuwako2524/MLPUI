@@ -113,6 +113,11 @@ def test_http_and_origin_guard(tmp_path, host):
             assert b"TRAINING STUDIO" in response.read()
         with urlopen(base + "/app.js") as response:
             assert b"renderDetail" in response.read()
+        with urlopen(base + "/api/presets") as response:
+            from mlpui.web.config import backend_metadata
+            catalog = json.load(response)
+            assert catalog["models"] == presets()
+            assert catalog["backends"] == backend_metadata()
         request = Request(base + "/api/preview", json.dumps(settings(tmp_path)).encode(),
                           {"Content-Type": "application/json"})
         with urlopen(request) as response:

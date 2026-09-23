@@ -3,22 +3,15 @@ from pathlib import Path
 import copy
 
 from mlpui.data import NpyDataset, NpyShards
+from mlpui.backends import get_backend, registered_backends
 
 
 def presets():
-    return {
-        "newtonnet": dict(cutoff=5., n_features=64, n_basis=20, n_interactions=3,
-                          activation="silu", output_properties=["energy", "gradient_force"]),
-        "torchmdnet": dict(model="tensornet", precision=32, embedding_dimension=64,
-            num_layers=3, num_rbf=32, rbf_type="expnorm", trainable_rbf=False,
-            activation="silu", cutoff_lower=0., cutoff_upper=5., max_z=119,
-            max_num_neighbors=64, aggr="add", neighbor_embedding=True,
-            attn_activation="silu", num_heads=4, distance_influence="both",
-            equivariance_invariance_group="O(3)", derivative=True, atom_filter=-1,
-            prior_model=None, output_model="Scalar", reduce_op="sum",
-            pred_dict={"y": 1., "neg_dy": 1.}),
-    }
+    return {backend.name: backend.default_config() for backend in registered_backends()}
 
+
+def backend_metadata():
+    return {backend.name: backend.metadata() for backend in registered_backends()}
 
 def dataset(spec):
     options = copy.deepcopy(spec)
@@ -47,7 +40,7 @@ def normalize(payload):
     if not value["name"] or len(value["name"]) > 100:
         raise ValueError("Task name must contain 1–100 characters")
     if value.get("family") not in presets():
-        raise ValueError("Select NewtonNet or TorchMD-Net")
+        raise ValueError("Select a registered model backend")
     if not isinstance(value.get("model_config"), dict) or not value["model_config"]:
         raise ValueError("Model configuration must be a nonempty JSON object")
     options = dict(value.get("training", {}))
@@ -104,9 +97,7 @@ def normalize(payload):
 def inspect_data(settings):
     result = {}
     labels = set(settings["training"].get("loss_weights", {"energy": 1, "forces": 1}))
-    model_config = settings["model_config"]
-    if settings["family"] == "newtonnet":
-        model_config = model_config.get("model", model_config)
+    model_config = get_backend(settings["family"]).settings(settings["model_config"])
     if model_config.get("charge_constraint", False):
         labels.add("charge")
     for key in ("train", "validation", "test", "evaluation"):

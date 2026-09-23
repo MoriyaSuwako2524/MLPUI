@@ -232,6 +232,9 @@ def test_periodic_saving_retention_and_test_cadence(tmp_path, family):
 
 def test_failed_atomic_save_keeps_previous_checkpoint(tmp_path, monkeypatch):
     trainer = Trainer.__new__(Trainer)
+    from mlpui.backends import get_backend
+    trainer.backend = get_backend("newtonnet")
+    trainer.family = trainer.backend.name
     trainer.model = torch.nn.Linear(1, 1)
     trainer.model_config = {}
     trainer.history = []

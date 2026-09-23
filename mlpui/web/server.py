@@ -12,7 +12,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlparse, unquote
 from uuid import uuid4
 
-from mlpui.web.config import normalize, inspect_data, presets
+from mlpui.web.config import normalize, inspect_data, presets, backend_metadata
 from mlpui.web.worker import write_json, read_json
 from mlpui.web.datasets import DatasetManager
 
@@ -240,7 +240,7 @@ def make_server(root, port=8675, host="127.0.0.1"):
                     return self.respond(datasets.get(match[1]))
                 if path == "/api/presets":
                     import torch
-                    return self.respond({"models": presets(), "cuda": torch.cuda.is_available(),
+                    return self.respond({"models": presets(), "backends": backend_metadata(), "cuda": torch.cuda.is_available(),
                                          "root": str(manager.root)})
                 match = re.fullmatch(r"/api/jobs/([a-f0-9]{32})(?:/(log|config|evaluation|model|best|plots/(?:energy|forces|charges|dipole|stress)\.(?:png|svg)|checkpoints/epoch_[0-9]{6,}\.pt))?", path)
                 if match:

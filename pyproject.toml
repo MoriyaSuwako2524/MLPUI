@@ -15,7 +15,7 @@ requires-python = ">=3.10"
 
 
 dependencies = [
-    "torch>=2.0.0",
+    "torch>=2.3.0,!=2.4.1",
     "pytorch-lightning>=2.0.0",
     "torch_geometric>=2.0.0",
     "numpy>=1.20.0",
@@ -25,6 +25,9 @@ dependencies = [
     "psutil>=5.9",
     "omegaconf>=2.3",
     "lightning-utilities>=0.10",
+    "e3nn==0.4.4",
+    "opt_einsum_fx==0.1.4",
+    "scipy>=1.8",
 ]
 
 [project.optional-dependencies]
@@ -37,6 +40,7 @@ include = ["mlpui*", "scripts*"]
 [tool.setuptools.package-data]
 "mlpui.web" = ["static/*.html", "static/*.css", "static/*.js"]
 "mlpui.models.newtonnet" = ["LICENSE"]
+"mlpui.models.mace" = ["LICENSE.md"]
 "mlpui.models.torchmdnet" = ["LICENSE", "extensions/*.cpp", "extensions/neighbors/*.cpp", "extensions/neighbors/*.cu", "extensions/neighbors/*.cuh"]
 "mlpui.models" = ["VENDORED_MODELS.md"]
 

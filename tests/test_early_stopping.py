@@ -17,6 +17,10 @@ from test_web import settings, wait_job
 
 def controlled_trainer(tmp_path, sequence, **options):
     trainer = Trainer.__new__(Trainer)
+    # This fixture bypasses initialization to isolate the early-stopping loop.
+    from mlpui.backends import get_backend
+    trainer.backend = get_backend("newtonnet")
+    trainer.family = trainer.backend.name
     trainer.config = TrainingConfig(epochs=10, loss_weights={'energy': 1.}, early_stopping=True,
                                    early_stopping_patience=2, **options)
     trainer.model = torch.nn.Linear(1, 1, bias=False)
