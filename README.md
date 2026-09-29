@@ -2,7 +2,9 @@
 
 Python interfaces for machine-learning interatomic potentials. UMA, NewtonNet,
 TorchMD-Net and MACE network implementations are included under `mlpui/models/`.
-The UMA implementation remains experimental. Bundled fork revisions, local
+Native UMA-S-1.2 molecular energy/force inference and NVT MD are described in
+[docs/uma.md](docs/uma.md). Periodic UMA and UMA training remain unsupported.
+Bundled fork revisions, local
 changes and third-party licenses are recorded in
 [models/VENDORED_MODELS.md](mlpui/models/VENDORED_MODELS.md).
 
