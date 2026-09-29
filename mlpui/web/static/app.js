@@ -1,6 +1,6 @@
 const $ = id => document.getElementById(id);
 const active = new Set(['queued','starting','running','stopping']);
-const statuses = {queued:'排队中',cancelled:'已取消',starting:'准备中',running:'训练中',completed:'已完成',stopped:'已停止',failed:'失败',interrupted:'已中断'};
+const statuses = {queued:'Queued',cancelled:'Cancelled',starting:'Starting',running:'Training',completed:'Completed',stopped:'Stopped',failed:'Failed',interrupted:'Interrupted'};
 let jobs = [], models = {}, backends = {}, current = null, pollBusy = false;
 const backendLabel = family => backends[family]?.label || family;
 const escapeHTML = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -8,11 +8,11 @@ function notify(message='') { $('notice').textContent=message; $('notice').hidde
 async function api(path, payload) {
   const response = await fetch(path, payload === undefined ? {cache:'no-store'} : {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
   const result = await response.json();
-  if(!response.ok) throw new Error(result.error || '请求失败');
+  if(!response.ok) throw new Error(result.error || 'Request failed');
   return result;
 }
 function text(id) { return $(id).value.trim(); }
-function number(id) { const v=Number(text(id)); if(!text(id)||!Number.isFinite(v)) throw new Error('请填写有效的数值'); return v; }
+function number(id) { const v=Number(text(id)); if(!text(id)||!Number.isFinite(v)) throw new Error('Enter a valid number'); return v; }
 function groups(id) { return text(id).split(',').map(v=>v.trim()).filter(Boolean); }
 function payload() {
   const evaluating=text('task-type')==='evaluation';
@@ -23,29 +23,29 @@ function payload() {
     if(evaluating) {if($('eval-'+key).checked) weights[key]=1;}
     else if((key!=='charges'||$('train-charges').checked)&&number('weight-'+key)>0) weights[key]=number('weight-'+key);
   }
-  if(!Object.keys(weights).length) throw new Error('至少选择能量、力或原子电荷中的一项');
+  if(!Object.keys(weights).length) throw new Error('Select at least one target: energy, forces or atomic charges');
   const files={};
   for(const key of ['z','pos','energy','forces','charges','cell','pbc','offsets']) {
     if(['energy','forces','charges'].includes(key) && !(key in weights)) continue;
     if(text('file-'+key)) files[key]=text('file-'+key);
   }
-  for(const key of Object.keys(weights)) if(selected?!selected.summary.fields.includes(key):!files[key]) throw new Error('数据集缺少 '+key+' 标签');
+  for(const key of Object.keys(weights)) if(selected?!selected.summary.fields.includes(key):!files[key]) throw new Error('Dataset is missing '+key+' labels');
   const train=selected?structuredClone(selected.spec):{directory:text('directory'),files,gradients:$('gradients').checked,energy_scale:number('energy-scale'),length_scale:number('length-scale')};
   if(!selected&&groups('shards').length) train.shards=groups('shards');
   let model;
-  try { model=JSON.parse($('model-config').value); } catch { throw new Error('模型结构配置不是有效的 JSON'); }
+  try { model=JSON.parse($('model-config').value); } catch { throw new Error('Model architecture configuration is not valid JSON'); }
   const container=backends[text('family')]?.config_container;
   const modelSettings=container&&model[container]&&typeof model[container]==='object'?model[container]:model;
   if($('charge-constraint').checked) {
-    if(!('charges' in weights)) throw new Error('请同时启用原子电荷训练或评估');
+    if(!('charges' in weights)) throw new Error('Also enable atomic-charge training or evaluation');
     modelSettings.charge_constraint=true;
   }
   if(modelSettings.charge_constraint) {
-    if(selected?!selected.summary.fields.includes('charge'):!text('file-charge')) throw new Error('硬约束需要每个结构的总电荷 Q 文件');
+    if(selected?!selected.summary.fields.includes('charge'):!text('file-charge')) throw new Error('The hard constraint requires a total-charge Q file for every structure');
     if(!selected) files.charge=text('file-charge');
   }
   if(evaluating) {
-    if(!text('checkpoint')) throw new Error('评估需要填写已有模型路径');
+    if(!text('checkpoint')) throw new Error('Evaluation requires an existing model path');
     return {task_type:'evaluation',name:text('name'),family:text('family'),model_config:model,
       checkpoint:text('checkpoint'),evaluation:train,
       training:{dtype:text('dtype'),device:text('device'),loss_weights:weights}};
@@ -53,7 +53,7 @@ function payload() {
   const result={name:text('name'),family:text('family'),model_config:model,train,
     training:{epochs:number('epochs'),batch_size:number('batch-size'),learning_rate:number('learning-rate'),dtype:text('dtype'),device:text('device'),seed:number('seed'),loss_weights:weights,save_interval:number('save-interval'),max_checkpoints:number('max-checkpoints'),test_interval:number('test-interval')}};
   if(text('training-mode')==='continue') {
-    if(!text('checkpoint')) throw new Error('继续训练需要填写已有 .pt 模型路径');
+    if(!text('checkpoint')) throw new Error('Continuation requires an existing .pt model path');
     result.checkpoint=text('checkpoint');
   }
   if($('early-stopping').checked) Object.assign(result.training,{early_stopping:true,
@@ -81,11 +81,11 @@ function route() {
   for(const name of ['jobs','new','detail','datasets']) $(name+'-view').hidden=name!==view;
   $('nav-jobs').classList.toggle('active',view==='jobs'||view==='detail'); $('nav-new').classList.toggle('active',view==='new');
   $('nav-datasets').classList.toggle('active',view==='datasets');
-  $('breadcrumb').textContent=view==='datasets'?'数据集':view==='new'?'新建任务':view==='detail'?'任务详情':'任务列表';
+  $('breadcrumb').textContent=view==='datasets'?'Datasets':view==='new'?'New job':view==='detail'?'Job details':'Jobs';
   if(view==='datasets'||view==='new') loadDatasets().catch(error=>notify(error.message));
   notify(); current=null;
   if(view==='detail') {
-    $('detail-name').textContent='加载中…'; $('detail-meta').textContent=''; $('log').textContent='加载中…';
+    $('detail-name').textContent='Loading…'; $('detail-meta').textContent=''; $('log').textContent='Loading…';
     $('stop').hidden=true; $('download-model').hidden=true;
   }
   refresh();
@@ -96,43 +96,43 @@ function renderJobs() {
   $('count-queued').textContent=jobs.filter(j=>j.status==='queued').length;
   $('count-done').textContent=jobs.filter(j=>j.status==='completed').length;
   if(!jobs.length) {
-    $('job-list').innerHTML='<div class="empty"><div class="empty-icon">▦</div><h2>开始你的第一个任务</h2><p>连接 .npy 数据，配置模型。每次实验都有清晰的记录。</p><a class="button primary" href="#new">＋ 创建任务</a></div>';
+    $('job-list').innerHTML='<div class="empty"><div class="empty-icon">▦</div><h2>Start your first job</h2><p>Connect .npy data and configure a model. Each experiment keeps its own records.</p><a class="button primary" href="#new">＋ Create job</a></div>';
     return;
   }
-  $('job-list').innerHTML='<div class="table-wrap"><table><thead><tr><th>任务</th><th>模型</th><th>状态</th><th>进度</th><th>创建时间</th></tr></thead><tbody>'+jobs.map(j=>`<tr><td><a href="#job/${j.id}">${escapeHTML(j.name)}</a><small>${j.task_type==='evaluation'?'评估':'训练'} · ${j.id.slice(0,8)} · ${escapeHTML(j.assigned_device||j.requested_device||'cpu')}${j.status==='queued'?' · 等待中':''}</small></td><td>${escapeHTML(backendLabel(j.family))}</td><td><span class="badge ${escapeHTML(j.status)}">${j.stop_requested&&active.has(j.status)?'正在停止':(j.task_type==='evaluation'&&j.status==='running'?'评估中':statuses[j.status])||escapeHTML(j.status)}</span></td><td>${j.task_type==='evaluation'?`${j.completed||0} / ${j.summary.evaluation.samples} 结构`:`${j.history.length} / ${j.epochs} epochs`}</td><td>${escapeHTML(new Date(j.created*1000).toLocaleString())}</td></tr>`).join('')+'</tbody></table></div>';
+  $('job-list').innerHTML='<div class="table-wrap"><table><thead><tr><th>Job</th><th>Model</th><th>Status</th><th>Progress</th><th>Created</th></tr></thead><tbody>'+jobs.map(j=>`<tr><td><a href="#job/${j.id}">${escapeHTML(j.name)}</a><small>${j.task_type==='evaluation'?'Evaluation':'Training'} · ${j.id.slice(0,8)} · ${escapeHTML(j.assigned_device||j.requested_device||'cpu')}${j.status==='queued'?' · Waiting':''}</small></td><td>${escapeHTML(backendLabel(j.family))}</td><td><span class="badge ${escapeHTML(j.status)}">${j.stop_requested&&active.has(j.status)?'Stopping':(j.task_type==='evaluation'&&j.status==='running'?'Evaluating':statuses[j.status])||escapeHTML(j.status)}</span></td><td>${j.task_type==='evaluation'?`${j.completed||0} / ${j.summary.evaluation.samples} structures`:`${j.history.length} / ${j.epochs} epochs`}</td><td>${escapeHTML(new Date(j.created*1000).toLocaleString('en-US'))}</td></tr>`).join('')+'</tbody></table></div>';
 }
 function renderDetail(job) {
   current=job;
   const evaluating=job.task_type==='evaluation';
   $('detail-name').textContent=job.name;
-  $('detail-meta').textContent=`${backendLabel(job.family)} · ${(job.summary.evaluation||job.summary.train).samples} 个${evaluating?'评估':'训练'}结构 · ${job.id.slice(0,8)}`;
+  $('detail-meta').textContent=`${backendLabel(job.family)} · ${(job.summary.evaluation||job.summary.train).samples} ${evaluating?'evaluation':'training'} structures · ${job.id.slice(0,8)}`;
   $('detail-status').className='badge '+job.status;
-  $('detail-status').textContent=job.stop_requested&&active.has(job.status)?'正在停止':statuses[job.status];
+  $('detail-status').textContent=job.stop_requested&&active.has(job.status)?'Stopping':statuses[job.status];
   const partial=job.phase==='training'?(job.completed||0)/(job.total||1):['validation','test'].includes(job.phase)?1:0;
   const epoch=job.history.length;
   $('progress').value=Math.min(100,100*(epoch+partial)/job.epochs);
-  $('progress-label').textContent=`${epoch} / ${job.epochs} epochs`+(job.phase==='training'?` · ${job.completed} / ${job.total} 结构`:job.phase==='loading'?' · 正在加载模型与数据':job.phase==='validation'?' · 正在验证':job.phase==='test'?' · 正在评估测试集':'');
+  $('progress-label').textContent=`${epoch} / ${job.epochs} epochs`+(job.phase==='training'?` · ${job.completed} / ${job.total} structures`:job.phase==='loading'?' · Loading model and data':job.phase==='validation'?' · Validating':job.phase==='test'?' · Evaluating test set':'');
   if(evaluating) {
     $('progress').value=100*(job.completed||0)/(job.summary.evaluation.samples||1);
-    $('progress-label').textContent=`${job.completed||0} / ${job.summary.evaluation.samples} 结构`+(job.phase==='loading'?' · 正在加载模型与数据':'');
-    if(job.status==='running') $('detail-status').textContent=job.phase==='plotting'?'正在绘图':'评估中';
+    $('progress-label').textContent=`${job.completed||0} / ${job.summary.evaluation.samples} structures`+(job.phase==='loading'?' · Loading model and data':'');
+    if(job.status==='running') $('detail-status').textContent=job.phase==='plotting'?'Generating plots':'Evaluating';
   }
   $('detail-error').hidden=!job.error; $('detail-error').textContent=job.error||'';
   $('stop').hidden=!active.has(job.status); $('stop').disabled=job.stop_requested;
-  $('stop').textContent=job.status==='queued'?'取消排队':job.stop_requested?'正在停止…':'停止任务';
-  if(job.status==='queued') $('progress-label').textContent=`排队位置 ${job.queue_position||'—'} · ${job.queue_reason||'等待调度'}`;
+  $('stop').textContent=job.status==='queued'?'Cancel queued job':job.stop_requested?'Stopping…':'Stop job';
+  if(job.status==='queued') $('progress-label').textContent=`Queue position ${job.queue_position||'—'} · ${job.queue_reason||'Waiting for scheduling'}`;
   $('detail-meta').textContent+=` · ${job.assigned_device||job.requested_device||'cpu'}`;
   const early=job.early_stopping;
   $('early-stopping-result').hidden=!early;
-  $('early-stopping-result').textContent=early?`${early.stopped?'已触发早停':'早停监控'} · 验证集 ${early.monitor} · 最佳 epoch ${early.best_epoch??'—'} · 最佳值 ${early.best_value==null?'—':early.best_value.toExponential(5)} · 无足够改善 ${early.bad_epochs}/${early.patience} 轮`:'';
-  if(job.stop_reason==='early_stopping'){$('detail-status').textContent='已早停';$('progress').value=100;$('progress-label').textContent=`${epoch} / ${job.epochs} epochs · 验证集未继续改善`;}
+  $('early-stopping-result').textContent=early?`${early.stopped?'Early stopping triggered':'Early-stopping monitor'} · Validation set ${early.monitor} · Best epoch ${early.best_epoch??'—'} · Best value ${early.best_value==null?'—':early.best_value.toExponential(5)} · Epochs without sufficient improvement: ${early.bad_epochs}/${early.patience}`:'';
+  if(job.stop_reason==='early_stopping'){$('detail-status').textContent='Early stopped';$('progress').value=100;$('progress-label').textContent=`${epoch} / ${job.epochs} epochs · Validation did not improve sufficiently`;}
   $('download-best').hidden=!job.best_checkpoint;
   $('download-best').href=`/api/jobs/${job.id}/best`;
   $('output-path').textContent=job.directory;
   $('download-model').hidden=!job.checkpoint || !['completed','stopped'].includes(job.status);
   $('download-model').href=`/api/jobs/${job.id}/model`;
   $('download-config').href=`/api/jobs/${job.id}/config`;
-  $('checkpoint-list').innerHTML=(job.checkpoints||[]).map(name=>`<a href="/api/jobs/${job.id}/checkpoints/${encodeURIComponent(name)}">${escapeHTML(name)} ↓</a>`).join('')||'<span class="muted">尚无定期保存的 checkpoint</span>';
+  $('checkpoint-list').innerHTML=(job.checkpoints||[]).map(name=>`<a href="/api/jobs/${job.id}/checkpoints/${encodeURIComponent(name)}">${escapeHTML(name)} ↓</a>`).join('')||'<span class="muted">No periodic checkpoints yet</span>';
   $('chart').closest('.panel').hidden=evaluating;
   $('checkpoint-list').closest('.panel').hidden=evaluating;
   $('evaluation-panel').hidden=!evaluating;
@@ -141,19 +141,19 @@ function renderDetail(job) {
   const plots=job.evaluation?.plots;
   const plotHTML=plots?Object.keys(plots).map(key=>{
     const url=`/api/jobs/${job.id}/plots/${encodeURIComponent(key)}`;
-    return `<article class="evaluation-plot"><h3>${escapeHTML(key)}</h3><img src="${url}.png" alt="${escapeHTML(key)}：参考值与预测值对比" loading="lazy"><div><a href="${url}.png" download="${key}.png">下载 PNG</a> · <a href="${url}.svg" download="${key}.svg">下载 SVG</a></div></article>`;
-  }).join(''):(job.evaluation?'<p class="footnote">此任务尚无图表，请重新运行评估生成。</p>':'');
+    return `<article class="evaluation-plot"><h3>${escapeHTML(key)}</h3><img src="${url}.png" alt="${escapeHTML(key)}: Reference vs. predicted values" loading="lazy"><div><a href="${url}.png" download="${key}.png">Download PNG</a> · <a href="${url}.svg" download="${key}.svg">Download SVG</a></div></article>`;
+  }).join(''):(job.evaluation?'<p class="footnote">No plots are available for this job. Run evaluation again to generate them.</p>':'');
   if($('evaluation-plots').innerHTML!==plotHTML) $('evaluation-plots').innerHTML=plotHTML;
-  $('evaluation-metrics').innerHTML=job.evaluation?'<table><thead><tr><th>指标</th><th>MAE</th><th>RMSE</th><th>MSE</th></tr></thead><tbody>'+Object.entries(job.evaluation.metrics).map(([key,m])=>`<tr><td>${escapeHTML(key)}</td><td>${m.mae.toExponential(5)}</td><td>${m.rmse.toExponential(5)}</td><td>${m.mse.toExponential(5)}</td></tr>`).join('')+'</tbody></table>':'尚无完整评估结果';
+  $('evaluation-metrics').innerHTML=job.evaluation?'<table><thead><tr><th>Metric</th><th>MAE</th><th>RMSE</th><th>MSE</th></tr></thead><tbody>'+Object.entries(job.evaluation.metrics).map(([key,m])=>`<tr><td>${escapeHTML(key)}</td><td>${m.mae.toExponential(5)}</td><td>${m.rmse.toExponential(5)}</td><td>${m.mse.toExponential(5)}</td></tr>`).join('')+'</tbody></table>':'No complete evaluation results yet';
   drawChart();
 }
 function drawChart() {
   if(!current) return;
   const metric=text('metric'), history=current.history;
   const lastTest=history.filter(r=>Number.isFinite(r.test?.[metric])).at(-1);
-  $('test-result').textContent=lastTest?`最近测试 · Epoch ${lastTest.epoch} · ${metric} MSE = ${lastTest.test[metric].toExponential(5)}`:'尚无该项测试集评估记录';
+  $('test-result').textContent=lastTest?`Latest test · Epoch ${lastTest.epoch} · ${metric} MSE = ${lastTest.test[metric].toExponential(5)}`:'No test-set results for this metric yet';
   const values=history.flatMap(r=>[r.train?.[metric],r.validation?.[metric],r.test?.[metric]]).filter(Number.isFinite);
-  if(!values.length){$('chart').innerHTML='<div class="empty"><p>等待首个 epoch 的 '+escapeHTML(metric)+' 损失记录</p></div>';return;}
+  if(!values.length){$('chart').innerHTML='<div class="empty"><p>Waiting for the first epoch of '+escapeHTML(metric)+' loss records</p></div>';return;}
   const W=900,H=230,L=80,R=20,T=15,B=32;
   let lo=Math.min(...values),hi=Math.max(...values);
   if(hi===lo){const pad=Math.abs(hi)*.1||1;lo=Math.max(0,lo-pad);hi+=pad;}
@@ -172,21 +172,21 @@ async function refresh() {
   if(pollBusy) return; pollBusy=true;
   const hash=location.hash;
   try {
-    jobs=await api('/api/jobs'); renderJobs(); $('connection').textContent='● 已连接';
+    jobs=await api('/api/jobs'); renderJobs(); $('connection').textContent='● Connected';
     if(hash.startsWith('#job/')) {
       const id=hash.slice(5),job=jobs.find(j=>j.id===id);
-      if(!job) throw new Error('未找到该训练任务');
+      if(!job) throw new Error('Training job not found');
       const log=await api(`/api/jobs/${id}/log`);
       if(location.hash!==hash) return;
-      renderDetail(job); $('log').textContent=log.text || '等待训练进程输出…';
+      renderDetail(job); $('log').textContent=log.text || 'Waiting for training process output…';
     }
-  } catch(error) { $('connection').textContent='连接或任务读取异常'; notify(error.message); }
+  } catch(error) { $('connection').textContent='Connection or job loading error'; notify(error.message); }
   finally { pollBusy=false; }
 }
 $('family').addEventListener('change',()=>{$('model-config').value=JSON.stringify(models[text('family')],null,2);updateBackendTargets();});
 function updateBackendTargets() {
   const targets=backends[text('family')]?.training_targets||[];
-  $('model-config-hint').textContent=backends[text('family')]?.config_hint||'从头训练可用默认值；继续训练时需与原模型结构一致。';
+  $('model-config-hint').textContent=backends[text('family')]?.config_hint||'Defaults are available for training from scratch; continuation requires the original model architecture.';
   const evaluating=text('task-type')==='evaluation';
   for(const key of ['energy','forces','charges']) {
     const supported=targets.includes(key);
@@ -202,7 +202,7 @@ function updateTaskType() {
   updateTrainingMode();
   $('split-hint').hidden=evaluating;
   $('training-hint').hidden=evaluating;
-  $('start').textContent=evaluating?'提交评估 →':'提交训练 →';
+  $('start').textContent=evaluating?'Submit evaluation →':'Submit training →';
   for(const id of ['epochs','batch-size','learning-rate','seed','weight-energy','weight-forces','train-charges','weight-charges','save-interval','max-checkpoints','test-interval','validation-shards','validation-directory','test-shards','test-directory']) {
     $(id).closest('label').hidden=evaluating; $(id).disabled=evaluating;
   }
@@ -211,9 +211,9 @@ function updateTaskType() {
   for(const id of ['early-stopping','early-monitor','early-patience','early-min-delta']) $(id).closest('label').hidden=evaluating;
   updateEarlyStopping();
   updateBackendTargets();
-  $('new-view').querySelector('h1').textContent=evaluating?'创建评估任务':'创建训练任务';
-  $('new-view').querySelector('.page-title p').textContent=evaluating?'选择已有模型和带标签的 npy 数据，计算误差。模型结构配置须与原模型一致。':'选择模型，连接 NumPy 数据，然后开始训练。';
-  $('preview-result').textContent='检查文件、数组形状与标签。';
+  $('new-view').querySelector('h1').textContent=evaluating?'Create evaluation job':'Create training job';
+  $('new-view').querySelector('.page-title p').textContent=evaluating?'Choose an existing model and labeled NPY data to calculate errors. The architecture configuration must match the original model.':'Choose a model, connect NumPy data and start training.';
+  $('preview-result').textContent='Check files, array shapes and labels.';
 }
 $('task-type').addEventListener('change',updateTaskType);
 function updateTrainingMode(){
@@ -224,7 +224,7 @@ function updateTrainingMode(){
   $('checkpoint').closest('label').hidden=!needsCheckpoint;
   $('checkpoint').disabled=!needsCheckpoint;
   $('checkpoint').required=needsCheckpoint;
-  $('checkpoint-hint').textContent=evaluating?'评估必填':'继续训练必填';
+  $('checkpoint-hint').textContent=evaluating?'Required for evaluation':'Required for continuation';
 }
 $('training-mode').addEventListener('change',updateTrainingMode);
 function updateEarlyStopping(){
@@ -242,9 +242,9 @@ $('layout').addEventListener('change',()=>{
   $('shards').value=standard?'':'w00, w01'; $('validation-shards').value=''; $('test-shards').value=''; $('gradients').checked=!standard;
 });
 $('preview').addEventListener('click',async()=>{
-  notify(); $('preview').disabled=true; $('preview-result').textContent='正在检查…';
-  try { const data=await api('/api/preview',payload()); const main=data.evaluation||data.train; $('preview-result').textContent=`✓ ${main.samples} 个${data.evaluation?'评估':'训练'}结构 / ${main.groups} 组`+(data.validation?` · ${data.validation.samples} 个验证结构`:'')+(data.test?` · ${data.test.samples} 个测试结构`:''); }
-  catch(error){notify(error.message);$('preview-result').textContent='检查未通过，请核对数据配置。';}
+  notify(); $('preview').disabled=true; $('preview-result').textContent='Checking…';
+  try { const data=await api('/api/preview',payload()); const main=data.evaluation||data.train; $('preview-result').textContent=`✓ ${main.samples} ${data.evaluation?'evaluation':'training'} structures / ${main.groups} groups`+(data.validation?` · ${data.validation.samples} validation structures`:'')+(data.test?` · ${data.test.samples} test structures`:''); }
+  catch(error){notify(error.message);$('preview-result').textContent='Validation failed. Check the data settings.';}
   finally{$('preview').disabled=false;}
 });
 $('training-form').addEventListener('submit',async event=>{
@@ -264,8 +264,8 @@ async function init(){
   $('start').disabled=true;
   try{const config=await api('/api/presets');models=config.models;backends=config.backends;
     $('family').replaceChildren(...Object.keys(models).map(name=>new Option(backendLabel(name),name)));
-    $('model-config').value=JSON.stringify(models[text('family')],null,2);$('runs-root').textContent='输出位置 · '+config.root;
-    const gpu=$('device').querySelector('[value="cuda"]');gpu.disabled=!config.cuda;if(!config.cuda)gpu.textContent='GPU · 未检测到 CUDA';$('start').disabled=false;
+    $('model-config').value=JSON.stringify(models[text('family')],null,2);$('runs-root').textContent='Output directory · '+config.root;
+    const gpu=$('device').querySelector('[value="cuda"]');gpu.disabled=!config.cuda;if(!config.cuda)gpu.textContent='GPU · CUDA not detected';$('start').disabled=false;
   }catch(error){notify(error.message);}
   updateTaskType();route();setInterval(refresh,2000);
 }

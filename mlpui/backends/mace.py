@@ -17,7 +17,7 @@ class MACEBackend(ModelBackend):
 
     def metadata(self):
         return {**super().metadata(), "config_hint":
-                "请将 atomic_numbers 设为数据包含的元素，并填写对应 atomic_energies（训练单位）。默认参考能为 0，不会自动拟合；继续训练须使用原模型配置。"}
+                "Set atomic_numbers to the elements in the data and supply matching atomic_energies in training units. Reference energies default to 0 and are not fitted automatically. Continuation requires the original model configuration."}
 
     def configure_targets(self, config, targets):
         return self.validate_config(super().configure_targets(config, targets))

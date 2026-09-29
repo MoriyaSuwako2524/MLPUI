@@ -122,7 +122,7 @@ class JobManager:
                 candidates = ["cpu"] if requested == "cpu" else [g["device"] for g in gpus if g["idle"] and requested in ("cuda", g["device"])]
                 device = next((d for d in candidates if d not in occupied), None)
                 if device is None:
-                    state.update(queue_position=position, queue_reason=("GPU 检测暂不可用，等待重试" if probe_error else "等待空闲 GPU") if requested.startswith("cuda") else "等待 CPU 任务完成")
+                    state.update(queue_position=position, queue_reason=("GPU detection unavailable; waiting to retry" if probe_error else "Waiting for an available GPU") if requested.startswith("cuda") else "Waiting for the CPU job to finish")
                     write_json(self.folder(state["id"]) / "status.json", state)
                     continue
                 self.launch(state, device)
