@@ -1,6 +1,6 @@
 """Langevin NVT using MLPUI's CalculatorBuilder (energies eV, lengths Angstrom).
 
-Example: python -m scripts.md.nvt --xyz water.xyz --checkpoint uma.pt
+Example: python -m mlpui.scripts.nvt --xyz water.xyz --checkpoint uma.pt
          --temperature-k 300 --duration-ps 1 --timestep-fs 0.5 --output run01
 
 The native UMA backend supports omol, nonperiodic molecules, energy and forces.

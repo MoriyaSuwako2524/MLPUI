@@ -54,7 +54,7 @@ For this single-atom convention, spin is ignored with an explicit warning.
 From the project root:
 
 ```powershell
-.\.venv\Scripts\python.exe -m scripts.md.nvt --xyz molecule.xyz --checkpoint C:/Users/suwak/Documents/uma/uma-s-1p2.pt --temperature-k 300 --duration-ps 1 --timestep-fs 0.5 --friction-per-ps 10 --charge 0 --spin 1 --device cuda --output runs/molecule_300K
+.\.venv\Scripts\python.exe -m mlpui.scripts.nvt --xyz molecule.xyz --checkpoint C:/Users/suwak/Documents/uma/uma-s-1p2.pt --temperature-k 300 --duration-ps 1 --timestep-fs 0.5 --friction-per-ps 10 --charge 0 --spin 1 --device cuda --output runs/molecule_300K
 ```
 
 Replace `--duration-ps 1` with `--steps 2000` to request steps. The duration must
@@ -74,6 +74,17 @@ The output directory must be new. It contains `trajectory.traj`, `thermo.csv`,
 `final.extxyz`, and `run.json`. The initial and successful final frames are saved
 even if the requested output interval does not divide the number of steps.
 Failed or interrupted runs retain previous outputs and record their status.
+
+For the supplied Slurm cluster configuration, submit from the project root:
+
+```bash
+mkdir -p logs
+MD_STEPS=100 sbatch scripts/slurm/uma_nvt.sbatch
+```
+
+The job uses `python -m mlpui.scripts.nvt` and checks that module in the selected
+Python environment. The old `scripts.md.nvt` entry point has been removed.
+Adjust the cluster paths and resource directives in the submission script as needed.
 
 ## Validation
 

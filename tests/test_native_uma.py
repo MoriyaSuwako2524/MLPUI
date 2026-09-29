@@ -102,7 +102,7 @@ def test_checkpoint_rejects_missing_head_weights(real_builder):
 
 @pytest.mark.integration
 def test_real_short_nvt(real_builder, tmp_path):
-    from scripts.md.nvt import parse_args, run
+    from mlpui.scripts.nvt import parse_args, run
     from ase.io import write, read
     import json
     xyz = tmp_path / 'water.xyz'
