@@ -32,13 +32,13 @@ version, reference energies and precision. Energy is total energy per structure;
 the shared trainer's force and charge losses average over components per structure.
 This is MLPUI's training recipe, not MACE's upstream CLI/EMA/SWA training recipe.
 
-Enable **训练原子电荷预测** and supply `charges.npy` to train E/F/charges together.
+Enable **Train atomic charge prediction** and supply `charges.npy` to train E/F/charges together.
 The backend creates `predict_charges: true` automatically. Charge-only training
 and evaluation also work. Predicted charges come from a separate invariant
 scalar MLP sharing MACE features. They are supervised partial charges, not
 PolarMACE's self-consistent electrostatic quantities, and do not enter the energy.
 
-Enable **总电荷硬约束** and supply `charge.npy` for explicit total Q per structure
+Enable **Hard total-charge constraint** and supply `charge.npy` for explicit total Q per structure
 (including zeros for neutral molecules). It uses the existing differentiable
 `q_i += (Q - sum(q))/N` projection. Total Q is not otherwise an input to the MACE
 energy representation, and there is no explicit long-range electrostatic term.

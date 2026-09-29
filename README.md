@@ -141,7 +141,7 @@ See the [MACE guide](docs/mace.md) and [training example](configs/train_mace.yam
 ### Optional supervised atomic charges
 
 Bundled NewtonNet, TensorNet and MACE support charge prediction. In the WebUI,
-enable **训练原子电荷预测**, set its loss weight, and map the charge label file.
+enable **Train atomic charge prediction**, set its loss weight, and map the charge label file.
 The standard filename is `charges.npy`; grouped QM data defaults to
 `qm_charge_{shard}.npy` and can be changed to your actual filename. Dense labels
 have shape `[samples, atoms]` or `[samples, atoms, 1]`; ragged labels have shape
@@ -156,7 +156,7 @@ not an automatic LES energy correction. Existing custom configurations with
 charge before energy keep the original LES behavior and require `les`.
 
 Training, validation and periodic testing record charge MSE. Standalone
-evaluation offers **评估原子电荷** and reports charge MAE/RMSE/MSE. Charge-only
+evaluation offers **Evaluate atomic charges** and reports charge MAE/RMSE/MSE. Charge-only
 training/evaluation is also allowed. ASE inference uses `properties=["charges"]`
 and `atoms.get_charges()`. Total-charge conservation is optional, as described below.
 Checkpoint loading remains strict: an energy-only checkpoint cannot gain a
@@ -165,7 +165,7 @@ a checkpoint already containing the matching head. Defaults remain energy/forces
 
 ### Optional hard total-charge constraint
 
-Enable **总电荷硬约束** together with charge training/evaluation. Supply a second
+Enable **Hard total-charge constraint** together with charge training/evaluation. Supply a second
 NumPy file for the total charge Q of every structure: `charge.npy` in standard
 layout or `total_charge_{shard}.npy` in grouped layout (custom names supported).
 Its shape is `[samples]` or `[samples, 1]`, in units of e. This is separate from
@@ -216,7 +216,7 @@ calls. Set `keep_on_device=False` to offload after inference.
 ## Basic WebUI
 
 For manual deployment with Slurm, password-based SSH tunnels, and the existing
-NewtonNet environment, see the [Chinese cluster deployment guide](docs/cluster-deployment.zh-CN.md)
+NewtonNet environment, see the [cluster deployment guide](docs/cluster-deployment.md)
 and [GPU submission script](scripts/slurm/mlpui_web.sbatch).
 
 Launch from the project directory using the environment containing your backends:
@@ -285,7 +285,7 @@ Host/Origin checks are not authentication. Keep the browser on localhost and
 use the same port at both ends of the SSH tunnel.
 UMA is not included in this UI.
 
-The **数据集** page provides a persistent NPY dataset library:
+The **Datasets** page provides a persistent NPY dataset library:
 
 - Register a server-side directory without moving its files, or upload multiple
   numeric `.npy` files from the browser (20 GiB per file; streamed to disk).
@@ -319,7 +319,7 @@ with corrected mappings in the same page. Old tasks retain their data paths.
 For correlated trajectories, use ordered splitting or register separate trajectory
 groups; random frame splitting alone does not prevent temporal leakage.
 
-For training, **训练方式** defaults to **从头训练**. Choose **从已有 .pt 模型继续训练**
+For training, **Training mode** defaults to **Train from scratch**. Choose **Continue from an existing .pt model**
 to reveal the required checkpoint path (`model.pt`, `best.pt`, or a periodic
 checkpoint). The model family and structure configuration must match the saved
 model. Existing weights are loaded, while optimizer, epoch numbering and early
@@ -327,7 +327,7 @@ stopping counters start afresh. Outputs go to a new task directory and do not
 overwrite the source checkpoint. Switching back to scratch training ignores any
 previously entered checkpoint path.
 
-For a standalone evaluation, choose **评估已有模型** under **新建任务**.
+For a standalone evaluation, choose **Evaluate an existing model** under **New job**.
 Supply an existing checkpoint, matching model structure configuration, and an
 `.npy` dataset (standard, custom mapping, or prefixed shards). Select energy,
 forces, or both, plus device and precision. Evaluation performs one pass without
@@ -473,7 +473,7 @@ tests skip if optional backends are not installed; check the reported skip count
 
 ### Optional early stopping
 
-Optional early stopping is available in training tasks. Enable **启用早停** and
+Optional early stopping is available in training tasks. Enable **Enable early stopping** and
 provide an independent validation dataset. Defaults: monitor `loss` (the weighted
 sum of validation MSEs), patience 10 validation epochs, absolute min_delta 0.
 An individual enabled target (`energy`, `forces`, `charges`, etc.) may be monitored
