@@ -59,6 +59,22 @@ def test_ragged_artifacts_use_offsets_without_pickle(tmp_path):
     assert np.load(tmp_path / "artifacts/frame_index.npy").tolist() == [0, 1]
 
 
+def test_offsets_storage_with_fixed_atom_count_exports_dense(tmp_path):
+    path = tmp_path / "data"
+    path.mkdir()
+    np.save(path / "z.npy", np.array([6, 1, 6, 1], dtype=np.int64))
+    np.save(path / "pos.npy", np.zeros((4, 3)))
+    np.save(path / "offsets.npy", np.array([0, 2, 4], dtype=np.int64))
+    np.save(path / "charges.npy", np.zeros(4))
+    data = NpyDataset(path)
+    observations = {"charges": [(np.zeros(2), np.ones(2)),
+                                  (np.zeros(2), np.ones(2) * 2)]}
+    result = save_evaluation_artifacts(observations, data, tmp_path / "artifacts")
+    assert result["properties"]["charges"]["layout"] == "dense"
+    assert np.load(tmp_path / "artifacts/charges_pred.npy").shape == (2, 2)
+    assert not (tmp_path / "artifacts/structure_offsets.npy").exists()
+
+
 def test_invalid_sidecars_do_not_publish_partial_directory(tmp_path):
     data = dense_data(tmp_path / "data")
     (tmp_path / "data/is_guard.npy").unlink()

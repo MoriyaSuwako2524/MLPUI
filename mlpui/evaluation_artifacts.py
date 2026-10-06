@@ -145,7 +145,10 @@ def save_evaluation_artifacts(observations, data, directory, *, metadata=None):
     staging.mkdir(parents=True)
     try:
         atom_counts = np.asarray([len(data[index]["z"]) for index in range(len(data))], dtype=np.int64)
-        variable_atoms = bool(len(np.unique(atom_counts)) > 1 or any(part.ragged for part in _parts(data)))
+        # The source may use offsets merely as a storage format. Preserve the
+        # friendlier [samples, atoms, ...] artifact shape whenever every
+        # evaluated structure has the same atom count, including ragged input.
+        variable_atoms = bool(len(np.unique(atom_counts)) > 1)
         files, properties = {}, {}
         for prop, pairs in observations.items():
             if len(pairs) != len(data):
