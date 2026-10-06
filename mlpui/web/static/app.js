@@ -30,7 +30,7 @@ function payload() {
     if(text('file-'+key)) files[key]=text('file-'+key);
   }
   for(const key of Object.keys(weights)) if(selected?!selected.summary.fields.includes(key):!files[key]) throw new Error('数据集缺少 '+key+' 标签');
-  const train=selected?structuredClone(selected.spec):{directory:text('directory'),files,gradients:$('gradients').checked,energy_scale:number('energy-scale'),length_scale:number('length-scale')};
+  const train=selected?{...structuredClone(selected.spec),dataset_id:selected.id,dataset_name:selected.name}:{directory:text('directory'),files,gradients:$('gradients').checked,energy_scale:number('energy-scale'),length_scale:number('length-scale')};
   if(!selected&&groups('shards').length) train.shards=groups('shards');
   let model;
   try { model=JSON.parse($('model-config').value); } catch { throw new Error('模型结构配置不是有效的 JSON'); }
@@ -136,6 +136,7 @@ function renderDetail(job) {
   $('chart').closest('.panel').hidden=evaluating;
   $('checkpoint-list').closest('.panel').hidden=evaluating;
   $('evaluation-panel').hidden=!evaluating;
+  $('evaluation-artifacts-panel').hidden=!evaluating;
   $('download-evaluation').hidden=!job.evaluation;
   $('download-evaluation').href=`/api/jobs/${job.id}/evaluation`;
   const plots=job.evaluation?.plots;
@@ -144,6 +145,9 @@ function renderDetail(job) {
     return `<article class="evaluation-plot"><h3>${escapeHTML(key)}</h3><img src="${url}.png" alt="${escapeHTML(key)}：参考值与预测值对比" loading="lazy"><div><a href="${url}.png" download="${key}.png">下载 PNG</a> · <a href="${url}.svg" download="${key}.svg">下载 SVG</a></div></article>`;
   }).join(''):(job.evaluation?'<p class="footnote">此任务尚无图表，请重新运行评估生成。</p>':'');
   if($('evaluation-plots').innerHTML!==plotHTML) $('evaluation-plots').innerHTML=plotHTML;
+  const artifacts=job.evaluation?.artifacts;
+  const artifactFiles=artifacts?Object.keys(artifacts.files||{}):[];
+  $('evaluation-artifacts').innerHTML=artifactFiles.length?'<strong>Prediction and reference arrays</strong>'+artifactFiles.map(name=>`<a href="/api/jobs/${job.id}/artifacts/${encodeURIComponent(name)}" download="${escapeHTML(name)}">${escapeHTML(name)} &#8595;</a>`).join('')+`<a href="/api/jobs/${job.id}/artifacts/${encodeURIComponent(artifacts.manifest)}" download="metadata.json">metadata.json &#8595;</a>`:(job.evaluation?'<span class="muted">No exported arrays</span>':'');
   $('evaluation-metrics').innerHTML=job.evaluation?'<table><thead><tr><th>指标</th><th>MAE</th><th>RMSE</th><th>MSE</th></tr></thead><tbody>'+Object.entries(job.evaluation.metrics).map(([key,m])=>`<tr><td>${escapeHTML(key)}</td><td>${m.mae.toExponential(5)}</td><td>${m.rmse.toExponential(5)}</td><td>${m.mse.toExponential(5)}</td></tr>`).join('')+'</tbody></table>':'尚无完整评估结果';
   drawChart();
 }

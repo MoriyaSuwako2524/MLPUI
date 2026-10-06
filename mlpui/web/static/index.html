@@ -121,6 +121,7 @@
     </form>
   </section>
   <section id="detail-view" hidden>
+    <div id="evaluation-artifacts-panel" class="panel" hidden><div class="panel-heading"><h2>Evaluation arrays</h2><span class="muted">Predictions, references, ordering and provenance</span></div><div id="evaluation-artifacts" class="output evaluation-artifacts"></div></div>
     <div class="page-title"><div><a href="#jobs" class="back">← 全部任务</a><h1 id="detail-name"></h1><p id="detail-meta"></p></div><button id="stop" class="danger">停止训练</button></div>
     <div class="panel progress-panel"><div><span id="detail-status" class="badge"></span><span id="progress-label"></span></div><progress id="progress" value="0" max="100"></progress><p id="early-stopping-result" class="hint" hidden></p><p id="detail-error" role="alert" hidden></p></div>
     <div id="evaluation-panel" class="panel" hidden><div class="panel-heading"><h2>评估结果</h2><a id="download-evaluation" target="_blank" rel="noopener">查看结果 JSON ↗</a></div><div id="evaluation-metrics" class="output"></div><div id="evaluation-plots" class="evaluation-plots"></div><p class="footnote">能量按结构统计；力按全部原子的笛卡尔分量统计；电荷按原子统计。单位沿用数据换算设置，不拟合能量偏移。</p></div>

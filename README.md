@@ -356,6 +356,31 @@ dataset conversion; no energy-offset fitting is applied. Unlike the training
 loss, force metrics are component-weighted rather than structure-weighted.
 Cancelled or failed evaluations do not publish a complete result.
 
+Successful WebUI evaluations also publish validated NumPy artifacts under
+`artifacts/`. Every selected property has `<property>_pred.npy` (model output)
+and `<property>_ref.npy` (the reference label supplied by the dataset). Atomic
+charges from a fixed-size dataset therefore have shape `[samples, atoms]`, such
+as `(16000, 24)`. Variable-size atomic data is stored as a flat numeric array
+with `structure_offsets.npy`; object arrays and pickle are never used.
+
+`frame_index.npy` records the prediction row mapping. A dataset-side
+`frame_index.npy` is validated and preserved when present; otherwise the file is
+generated from the exact sequential evaluation order and `metadata.json` marks
+that origin. Complete `is_train.npy`, `is_validation.npy`, `is_test.npy`, and
+`is_guard.npy` sidecars are validated as an exclusive, exhaustive partition and
+copied to the result. `source_row_index.npy` (and `source_group.npy` for shards)
+provide an additional mapping back to the loaded dataset. The manifest records
+array shapes and roles, dataset files and conversions, the checkpoint path and
+SHA-256 identity, model family, and units (`e` for charges). Artifacts are staged
+in a temporary directory and become downloadable only after the entire set has
+validated and the evaluation reaches `completed`.
+
+Python callers can opt in with
+`trainer.evaluate(data, artifact_dir="evaluation/artifacts")`. The WebUI enables
+this export by default and offers a download link for every array and the
+manifest. As with parity plots, exporting retains the selected reference and
+prediction arrays in CPU memory until the evaluation finishes.
+
 Periodic files live at `checkpoints/epoch_000010.pt`, etc., and can be downloaded
 from task details even while training is active or after a failed/interrupted
 run. These contain weights, model config, epoch, and history, not optimizer/RNG

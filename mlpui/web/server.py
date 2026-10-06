@@ -242,7 +242,7 @@ def make_server(root, port=8675, host="127.0.0.1"):
                     import torch
                     return self.respond({"models": presets(), "backends": backend_metadata(), "cuda": torch.cuda.is_available(),
                                          "root": str(manager.root)})
-                match = re.fullmatch(r"/api/jobs/([a-f0-9]{32})(?:/(log|config|evaluation|model|best|plots/(?:energy|forces|charges|dipole|stress)\.(?:png|svg)|checkpoints/epoch_[0-9]{6,}\.pt))?", path)
+                match = re.fullmatch(r"/api/jobs/([a-f0-9]{32})(?:/(log|config|evaluation|model|best|plots/(?:energy|forces|charges|dipole|stress)\.(?:png|svg)|artifacts/[a-z][a-z0-9_]*\.(?:npy|json)|checkpoints/epoch_[0-9]{6,}\.pt))?", path)
                 if match:
                     job_id, action = match.groups()
                     folder = manager.folder(job_id)
@@ -267,6 +267,25 @@ def make_server(root, port=8675, host="127.0.0.1"):
                         self.send_header("X-Content-Type-Options", "nosniff")
                         self.end_headers()
                         self.wfile.write(content)
+                        return
+                    if action and action.startswith("artifacts/"):
+                        state = manager.get(job_id)
+                        if state["status"] != "completed" or not state.get("evaluation", {}).get("artifacts"):
+                            raise ValueError("Evaluation artifacts are not ready")
+                        artifacts = state["evaluation"]["artifacts"]
+                        name = action.removeprefix("artifacts/")
+                        if name not in set(artifacts.get("files", {})) | {artifacts.get("manifest")}:
+                            raise FileNotFoundError("Evaluation artifact not found")
+                        file = folder / "artifacts" / name
+                        with file.open("rb") as stream:
+                            self.send_response(200)
+                            self.send_header("Content-Type", "application/json" if file.suffix == ".json" else "application/octet-stream")
+                            self.send_header("Content-Disposition", f'attachment; filename="{file.name}"')
+                            self.send_header("Content-Length", str(os.fstat(stream.fileno()).st_size))
+                            self.send_header("X-Content-Type-Options", "nosniff")
+                            self.end_headers()
+                            while chunk := stream.read(1024 * 1024):
+                                self.wfile.write(chunk)
                         return
                     if action in ("model", "best") or (action and action.startswith("checkpoints/")):
                         if action == "model":
