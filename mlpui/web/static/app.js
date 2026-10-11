@@ -4,6 +4,12 @@ const statuses = {queued:'Queued',cancelled:'Cancelled',starting:'Starting',runn
 let jobs = [], models = {}, backends = {}, current = null, pollBusy = false;
 const backendLabel = family => backends[family]?.label || family;
 const escapeHTML = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+// Training records created before task types were introduced omit task_type.
+const jobType = job => job.task_type || (job.summary?.prediction ? 'prediction' : job.summary?.evaluation ? 'evaluation' : 'training');
+function jobSamples(job) {
+  const type=jobType(job), samples=job.summary?.[type==='training'?'train':type]?.samples;
+  return Number.isFinite(samples)&&samples>=0 ? samples : null;
+}
 function notify(message='') { $('notice').textContent=message; $('notice').hidden=!message; }
 async function api(path, payload) {
   const response = await fetch(path, payload === undefined ? {cache:'no-store'} : {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
@@ -111,23 +117,25 @@ function renderJobs() {
     $('job-list').innerHTML='<div class="empty"><div class="empty-icon">▦</div><h2>Start your first job</h2><p>Connect NPY data and configure a model. Each experiment keeps its own records.</p><a class="button primary" href="#new">＋ Create job</a></div>';
     return;
   }
-  $('job-list').innerHTML='<div class="table-wrap"><table><thead><tr><th>Job</th><th>Model</th><th>Status</th><th>Progress</th><th>Created</th></tr></thead><tbody>'+jobs.map(j=>`<tr><td><a href="#job/${j.id}">${escapeHTML(j.name)}</a><small>${j.task_type!=='training'?(j.task_type==='prediction'?'Prediction':'Evaluation'):'Training'} · ${j.id.slice(0,8)} · ${escapeHTML(j.assigned_device||j.requested_device||'cpu')}${j.status==='queued'?' · Waiting':''}</small></td><td>${escapeHTML(backendLabel(j.family))}</td><td><span class="badge ${escapeHTML(j.status)}">${j.stop_requested&&active.has(j.status)?'Stopping':(j.task_type!=='training'&&j.status==='running'?(j.task_type==='prediction'?'Predicting':'Evaluating'):statuses[j.status])||escapeHTML(j.status)}</span></td><td>${j.task_type!=='training'?`${j.completed||0} / ${(j.summary.prediction||j.summary.evaluation).samples} structures`:`${j.history.length} / ${j.epochs} epochs`}</td><td>${escapeHTML(new Date(j.created*1000).toLocaleString())}</td></tr>`).join('')+'</tbody></table></div>';
+  $('job-list').innerHTML='<div class="table-wrap"><table><thead><tr><th>Job</th><th>Model</th><th>Status</th><th>Progress</th><th>Created</th></tr></thead><tbody>'+jobs.map(j=>`<tr><td><a href="#job/${j.id}">${escapeHTML(j.name)}</a><small>${jobType(j)!=='training'?(jobType(j)==='prediction'?'Prediction':'Evaluation'):'Training'} · ${j.id.slice(0,8)} · ${escapeHTML(j.assigned_device||j.requested_device||'cpu')}${j.status==='queued'?' · Waiting':''}</small></td><td>${escapeHTML(backendLabel(j.family))}</td><td><span class="badge ${escapeHTML(j.status)}">${j.stop_requested&&active.has(j.status)?'Stopping':(jobType(j)!=='training'&&j.status==='running'?(jobType(j)==='prediction'?'Predicting':'Evaluating'):statuses[j.status])||escapeHTML(j.status)}</span></td><td>${jobType(j)!=='training'?`${j.completed||0} / ${jobSamples(j)??'—'} structures`:`${(j.history||[]).length} / ${j.epochs} epochs`}</td><td>${escapeHTML(new Date(j.created*1000).toLocaleString())}</td></tr>`).join('')+'</tbody></table></div>';
 }
 function renderDetail(job) {
   current=job;
-  const predicting=job.task_type==='prediction';
-  const evaluating=job.task_type!=='training';
+  const predicting=jobType(job)==='prediction';
+  const evaluating=jobType(job)!=='training';
+  const samples=jobSamples(job);
   $('detail-name').textContent=job.name;
-  $('detail-meta').textContent=`${backendLabel(job.family)} · ${(job.summary.prediction||job.summary.evaluation||job.summary.train).samples}  ${predicting?'prediction':evaluating?'evaluation':'training'} structures · ${job.id.slice(0,8)}`;
+  $('detail-meta').textContent=`${backendLabel(job.family)} · ${samples??'—'}  ${predicting?'prediction':evaluating?'evaluation':'training'} structures · ${job.id.slice(0,8)}`;
   $('detail-status').className='badge '+job.status;
   $('detail-status').textContent=job.stop_requested&&active.has(job.status)?'Stopping':statuses[job.status];
   const partial=job.phase==='training'?(job.completed||0)/(job.total||1):['validation','test'].includes(job.phase)?1:0;
-  const epoch=job.history.length;
+  const epoch=(job.history||[]).length;
   $('progress').value=Math.min(100,100*(epoch+partial)/job.epochs);
   $('progress-label').textContent=`${epoch} / ${job.epochs} epochs`+(job.phase==='training'?` · ${job.completed} / ${job.total} structures`:job.phase==='loading'?' · Loading model and data':job.phase==='validation'?' · Validating':job.phase==='test'?' · Evaluating test data':'');
   if(evaluating) {
-    $('progress').value=100*(job.completed||0)/((job.summary.prediction||job.summary.evaluation).samples||1);
-    $('progress-label').textContent=`${job.completed||0} / ${(job.summary.prediction||job.summary.evaluation).samples} structures`+(job.phase==='loading'?' · Loading model and data':'');
+    if(samples===null) $('progress').removeAttribute('value');
+    else $('progress').value=Math.min(100,100*(job.completed||0)/(samples||1));
+    $('progress-label').textContent=`${job.completed||0} / ${samples??'—'} structures`+(job.phase==='loading'?' · Loading model and data':'');
     if(job.status==='running') $('detail-status').textContent=job.phase==='plotting'?'Plotting':'Evaluating';
   }
   $('detail-error').hidden=!job.error; $('detail-error').textContent=job.error||'';
@@ -169,7 +177,7 @@ function renderDetail(job) {
 }
 function drawChart() {
   if(!current) return;
-  const metric=text('metric'), history=current.history;
+  const metric=text('metric'), history=current.history||[];
   const lastTest=history.filter(r=>Number.isFinite(r.test?.[metric])).at(-1);
   $('test-result').textContent=lastTest?`Latest test · Epoch ${lastTest.epoch} · ${metric} MSE = ${lastTest.test[metric].toExponential(5)}`:'No test results for this target yet';
   const values=history.flatMap(r=>[r.train?.[metric],r.validation?.[metric],r.test?.[metric]]).filter(Number.isFinite);

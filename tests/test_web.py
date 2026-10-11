@@ -39,6 +39,25 @@ def wait_job(manager, job_id, terminal=True):
     pytest.fail("Worker did not reach the expected state")
 
 
+@pytest.mark.parametrize("kind", ["training", "evaluation", "prediction"])
+def test_legacy_job_type_does_not_rewrite_saved_results(tmp_path, kind):
+    manager = JobManager(tmp_path)
+    job_id = "a" * 32
+    folder = tmp_path / job_id
+    folder.mkdir()
+    state = {"id": job_id, "created": 1, "status": "completed",
+             "history": [{"epoch": 1, "train": {"energy": 0.2}}],
+             "summary": {"train" if kind == "training" else kind: {"samples": 8}}}
+    write_json(folder / "status.json", state)
+    (folder / "model.pt").write_bytes(b"saved checkpoint")
+    before = (folder / "status.json").read_bytes()
+    result = manager.list()[0]
+    assert result["task_type"] == kind
+    assert result["history"] == state["history"]
+    assert (folder / "status.json").read_bytes() == before
+    assert (folder / "model.pt").read_bytes() == b"saved checkpoint"
+
+
 def test_validation_and_preview(tmp_path):
     value = settings(tmp_path)
     assert inspect_data(normalize(value))["train"]["samples"] == 2

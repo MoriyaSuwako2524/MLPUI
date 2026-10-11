@@ -53,6 +53,12 @@ class JobManager:
                 if state["status"] in ACTIVE:
                     state.update(status="failed", error=f"Worker exited with code {process.returncode}")
                     write_json(folder / "status.json", state)
+            # Older training records have no task_type. Normalize the response
+            # without rewriting their saved history or results.
+            if not state.get("task_type"):
+                summary = state.get("summary") or {}
+                state["task_type"] = ("prediction" if summary.get("prediction") else
+                                      "evaluation" if summary.get("evaluation") else "training")
             state["stop_requested"] = (folder / "stop").exists()
             state["best_checkpoint"] = (folder / "best.pt").is_file()
             directory = folder / "checkpoints"
