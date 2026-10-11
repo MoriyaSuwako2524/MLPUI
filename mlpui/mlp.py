@@ -31,6 +31,10 @@ def load_checkpoint_guess_config(ckpt_path, output_model=True, model_options=Non
     from mlpui.model_loader import load_torch_file
 
     sd, metadata = load_torch_file(ckpt_path, return_metadata=True)
+    if metadata and metadata.get('model_config', {}).get('backbone'):
+        from mlpui.models.uma.predictor import load_native_uma
+        patcher = load_native_uma(sd, metadata, device=device, dtype=dtype)
+        return patcher if output_model else None
     model = load_state_dict_guess_config(sd,  output_model, model_options, metadata=metadata, disable_dynamic=disable_dynamic)
     if model is None:
         raise RuntimeError("ERROR: Could not detect model type of: {}\n{}".format(ckpt_path, model_detection_error_hint(ckpt_path, sd)))

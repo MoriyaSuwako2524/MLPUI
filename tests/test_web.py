@@ -1,11 +1,13 @@
 import importlib
 import copy
+from io import BytesIO
 import json
 import threading
 import time
 from urllib.request import Request, urlopen
 from urllib.error import HTTPError
 
+import numpy as np
 import pytest
 import torch
 
@@ -216,6 +218,18 @@ def test_evaluation_task_and_result_endpoint(tmp_path):
                     assert content.startswith(b"\x89PNG") if extension == "png" else b"<svg" in content
         with urlopen(base + f'/api/jobs/{job["id"]}/evaluation') as response:
             assert json.load(response) == state["evaluation"]
+        artifacts = state["evaluation"]["artifacts"]
+        assert {"energy_pred.npy", "energy_ref.npy", "forces_pred.npy", "forces_ref.npy",
+                "frame_index.npy", "source_row_index.npy"} <= set(artifacts["files"])
+        with urlopen(base + f'/api/jobs/{job["id"]}/artifacts/forces_pred.npy') as response:
+            assert response.headers["Content-Disposition"].endswith('"forces_pred.npy"')
+            prediction = np.load(BytesIO(response.read()), allow_pickle=False)
+            assert prediction.shape == (2, 3, 3)
+        with urlopen(base + f'/api/jobs/{job["id"]}/artifacts/metadata.json') as response:
+            metadata = json.load(response)
+            assert metadata["samples"] == 2
+            assert metadata["provenance"]["checkpoint"]["sha256"]
+            assert metadata["frame_index_origin"] == "generated_evaluation_order"
         assert not (server.manager.folder(job["id"]) / "model.pt").exists()
         assert checkpoint.read_bytes() == before
     finally:

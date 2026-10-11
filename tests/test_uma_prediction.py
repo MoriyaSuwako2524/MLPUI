@@ -14,9 +14,9 @@ from mlpui.training import TrainingStopped
 def settings(tmp_path):
     data = tmp_path / 'data'
     data.mkdir()
-    np.save(data / 'z.npy', [1, 1, 8])
-    np.save(data / 'pos.npy', np.ones((3, 3)))
-    np.save(data / 'offsets.npy', [0, 2, 3])
+    np.save(data / 'z.npy', [1, 1, 8, 1, 1])
+    np.save(data / 'pos.npy', np.ones((5, 3)))
+    np.save(data / 'offsets.npy', [0, 2, 5])
     np.save(data / 'charge.npy', [0, -1])
     np.save(data / 'spin.npy', [1, 2])
     checkpoint = tmp_path / 'uma.pt'
@@ -53,30 +53,28 @@ def test_prediction_outputs_and_metadata(tmp_path, monkeypatch):
     assert [a.info['charge'] for a in seen] == [0, -1]
     assert [a.info['spin'] for a in seen] == [1, 2]
     np.testing.assert_array_equal(seen[0].positions, np.full((2, 3), 2.))
-    np.testing.assert_array_equal(np.load(tmp_path / 'offsets.npy'), [0, 2, 3])
-    np.testing.assert_array_equal(np.load(tmp_path / 'energy.npy'), [2, 0])
-    np.testing.assert_array_equal(np.load(tmp_path / 'forces.npy')[:, 0], [1, 1, 2])
+    np.testing.assert_array_equal(np.load(tmp_path / 'offsets.npy'), [0, 2, 5])
+    np.testing.assert_array_equal(np.load(tmp_path / 'energy.npy'), [2, 2])
+    np.testing.assert_array_equal(np.load(tmp_path / 'forces.npy')[:, 0], [1, 1, 2, 2, 2])
     assert result['units']['energy'] == 'eV'
     assert events[-1]['completed'] == 2
     with pytest.raises(TrainingStopped):
         run_prediction(value, tmp_path, 'cpu', events.append, lambda: True)
 
 
-def test_official_calculator_adapter(monkeypatch):
-    import sys
+def test_native_calculator_adapter(monkeypatch):
     from mlpui.web.prediction import build_calculator
+    from mlpui.calculator import CalculatorBuilder
     calls = []
-    predictor = object()
-    def load(**kwargs):
-        calls.append(kwargs)
-        return predictor
-    monkeypatch.setitem(sys.modules, 'fairchem', SimpleNamespace())
-    monkeypatch.setitem(sys.modules, 'fairchem.core', SimpleNamespace(
-        FAIRChemCalculator=lambda model, task_name: (model, task_name)))
-    monkeypatch.setitem(sys.modules, 'fairchem.core.units', SimpleNamespace())
-    monkeypatch.setitem(sys.modules, 'fairchem.core.units.mlip_unit', SimpleNamespace(load_predict_unit=load))
-    assert build_calculator('/local/uma.pt', 'omol', 'cuda:1') == (predictor, 'omol')
-    assert calls == [{'path': '/local/uma.pt', 'device': 'cuda:1', 'inference_settings': 'default'}]
+    calculator = object()
+    def load(path, **kwargs):
+        calls.append((path, kwargs))
+        return SimpleNamespace(build=lambda: calculator)
+    monkeypatch.setattr(CalculatorBuilder, 'from_checkpoint', load)
+    assert build_calculator('/local/uma.pt', 'omol', 'cuda:1') is calculator
+    assert calls[0][0] == '/local/uma.pt'
+    assert calls[0][1]['device'] == 'cuda:1'
+    assert calls[0][1]['family'] == 'uma'
 
 
 def test_worker_and_downloads(tmp_path, monkeypatch):

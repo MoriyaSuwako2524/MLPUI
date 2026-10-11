@@ -41,6 +41,8 @@ include = ["mlpui*", "scripts*"]
 "mlpui.web" = ["static/*.html", "static/*.css", "static/*.js"]
 "mlpui.models.newtonnet" = ["LICENSE"]
 "mlpui.models.mace" = ["LICENSE.md"]
+"mlpui.models.uma" = ["LICENSE", "*.pt"]
+"mlpui.models.common.quaternion" = ["*.pt"]
 "mlpui.models.torchmdnet" = ["LICENSE", "extensions/*.cpp", "extensions/neighbors/*.cpp", "extensions/neighbors/*.cu", "extensions/neighbors/*.cuh"]
 "mlpui.models" = ["VENDORED_MODELS.md"]
 

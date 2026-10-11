@@ -124,8 +124,8 @@ class Trainer:
             if not torch.isfinite(errors[prop]).all():
                 raise ValueError(f"Non-finite prediction or target for {prop}")
             if on_prediction is not None:
-                on_prediction(prop, target.detach().cpu().double().numpy().reshape(-1),
-                              prediction.detach().cpu().double().numpy().reshape(-1))
+                on_prediction(prop, target.detach().cpu().double().numpy(),
+                              prediction.reshape(target.shape).detach().cpu().double().numpy())
         return errors
 
     def _loss(self, sample):
@@ -135,7 +135,8 @@ class Trainer:
             raise ValueError("Non-finite training loss")
         return total, losses
 
-    def evaluate(self, data, *, on_progress=None, should_stop=None, plot_dir=None):
+    def evaluate(self, data, *, on_progress=None, should_stop=None, plot_dir=None,
+                 artifact_dir=None, artifact_metadata=None):
         """Evaluate all scalar components without backward or optimizer updates.
 
         Energy is per structure; forces are pooled over all Cartesian components.
@@ -144,16 +145,18 @@ class Trainer:
         data = data if isinstance(data, (NpyDataset, NpyShards)) else NpyDataset(data)
         self.model.eval()
         totals = {key: dict(count=0, absolute=0., squared=0.) for key in self.config.loss_weights}
-        pairs = {key: [] for key in totals} if plot_dir is not None else None
+        observations = ({key: [] for key in totals}
+                        if plot_dir is not None or artifact_dir is not None else None)
 
         def collect(key, reference, prediction):
-            pairs[key].append(np.column_stack((reference, prediction)))
+            observations[key].append((reference, prediction))
         for index, sample in enumerate(data):
             if should_stop is not None and should_stop():
                 raise TrainingStopped("Evaluation stopped by user")
             # Forces require differentiation with respect to positions.
             with torch.enable_grad():
-                errors = self._errors(sample, on_prediction=collect) if pairs is not None else self._errors(sample)
+                errors = (self._errors(sample, on_prediction=collect)
+                          if observations is not None else self._errors(sample))
             for key, error in errors.items():
                 error = error.detach().to(device="cpu", dtype=torch.float64)
                 totals[key]["count"] += error.numel()
@@ -168,11 +171,22 @@ class Trainer:
                                 mse=mse, rmse=math.sqrt(mse), count=total["count"])
         result = {"samples": len(data), "aggregation": "all_scalar_components",
                 "units": "dataset units after configured conversion", "metrics": metrics}
-        if pairs is not None:
+        if plot_dir is not None:
             from mlpui.evaluation_plots import save_parity_plots
             if on_progress is not None:
                 on_progress({"phase": "plotting", "completed": len(data), "total": len(data)})
+            pairs = {key: [np.column_stack((reference.reshape(-1), prediction.reshape(-1)))
+                           for reference, prediction in chunks]
+                     for key, chunks in observations.items()}
             result["plots"] = save_parity_plots(pairs, metrics, plot_dir, should_stop=should_stop)
+        if artifact_dir is not None:
+            if should_stop is not None and should_stop():
+                raise TrainingStopped("Evaluation stopped by user")
+            from mlpui.evaluation_artifacts import save_evaluation_artifacts
+            if on_progress is not None:
+                on_progress({"phase": "saving", "completed": len(data), "total": len(data)})
+            result["artifacts"] = save_evaluation_artifacts(
+                observations, data, artifact_dir, metadata=artifact_metadata)
         return result
 
     def fit(self, train_data, validation_data=None, *, test_data=None, output_dir=None,

@@ -352,17 +352,21 @@ class CalculatorBuilder:
     properties: list[str] = field(default_factory=lambda: ["energy", "forces"])
     task: str | None = None
     charge: float | None = None
-    spin: int = 0
+    spin: int | None = None
     dtype: torch.dtype | None = None
     device: torch.device | str | None = None
     keep_on_device: bool = True
     energy_to_ev: float = 1.0
     length_to_angstrom: float = 1.0
     dipole_to_eangstrom: float = 1.0
+    atom_refs: Any = None
 
     def build(self):
 
         device = self._resolve_device()
+        if getattr(self.model_patcher.model, 'mlpui_native_uma', False):
+            from mlpui.models.uma.ase_calculator import NativeUMACalculator
+            return NativeUMACalculator(self, device)
         family = self._detect_model_family()
         from mlpui.backends import registered_backends
         if family in {backend.name for backend in registered_backends()}:
@@ -442,7 +446,7 @@ class CalculatorBuilder:
         if family == "uma":
             return UMAInputAdapter(
                 charge=self.charge if self.charge is not None else 0,
-                spin=self.spin,
+                spin=self.spin if self.spin is not None else 0,
                 task=self.task,
             )
 

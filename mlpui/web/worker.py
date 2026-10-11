@@ -75,7 +75,7 @@ def run(folder):
     def progress(event):
         nonlocal last_write
         now = time.monotonic()
-        if event["phase"] in {"epoch_end", "test", "validation", "plotting"} or now - last_write > .5:
+        if event["phase"] in {"epoch_end", "test", "validation", "plotting", "saving"} or now - last_write > .5:
             publish(**event)
             last_write = now
         if event["phase"] == "epoch_end":
@@ -121,8 +121,21 @@ def run(folder):
             data = dataset(settings["evaluation"])
             print(f"Evaluating {len(data)} structures on {trainer.config.device}", flush=True)
             try:
+                from mlpui.evaluation_artifacts import checkpoint_identity
+                spec = settings["evaluation"]
+                provenance = {
+                    "checkpoint": checkpoint_identity(settings["checkpoint"]),
+                    "model_family": settings["family"],
+                    "dataset_catalog": {key: spec[key] for key in ("dataset_id", "dataset_name") if key in spec},
+                    "dataset_options": {key: spec[key] for key in
+                                        ("files", "shards", "gradients", "energy_scale", "length_scale")
+                                        if key in spec},
+                    "targets": sorted(trainer.config.loss_weights),
+                }
                 result = trainer.evaluate(data, on_progress=progress,
                                           plot_dir=folder / "plots",
+                                          artifact_dir=folder / "artifacts",
+                                          artifact_metadata=provenance,
                                           should_stop=lambda: (folder / "stop").exists())
             except TrainingStopped:
                 publish(status="stopped", phase="stopped")

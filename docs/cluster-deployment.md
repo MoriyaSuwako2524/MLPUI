@@ -55,8 +55,7 @@ cd /path/to/work/mlpui-deployment/MLPUI
 "$PYTHON" -m pip install --no-deps -e .
 ```
 
-MLPUI declares Python 3.10 or later; the UMA inference environment has separate
-requirements. --no-deps preserves the existing PyTorch installation. Install any
+MLPUI declares Python 3.10 or later; native UMA is validated on Python 3.12. --no-deps preserves the existing PyTorch installation. Install any
 remaining requirements from pyproject.toml with versions compatible with the cluster.
 Use a site mirror or compatible offline wheels if internet access is unavailable.
 Optionally clone the existing environment with `conda create -n mlpui --clone newtonnet`
@@ -90,7 +89,7 @@ bundled extension using a toolchain compatible with PyTorch:
 A successful build reports native. Set MLPUI_NEIGHBORS=native to require it, or leave
 the default to permit fallback. A build node without a GPU may need
 TORCH_CUDA_ARCH_LIST. Do not load unavailable hard-coded modules such as GCC/9.3.0.
-For UMA, follow [UMA prediction setup](uma-prediction.md) and export MLPUI_UMA_PYTHON.
+For UMA, follow [UMA prediction setup](uma-prediction.md).
 
 ## 4. Submit the WebUI job
 
@@ -282,7 +281,7 @@ checkpoints are removed.
 | Invalid host / Cross-origin | Equal ports and http://127.0.0.1:PORT |
 | Weight/config mismatch | Model family, architecture and checkpoint |
 | Interrupted previous jobs | The previous server exited abnormally; records do not guarantee saved weights |
-| UMA dependency error | MLPUI_UMA_PYTHON and its FAIR-Chem installation |
+| UMA dependency error | Installed project dependencies and a supported UMA checkpoint |
 
 ## 9. Queue and multiple GPUs
 

@@ -9,6 +9,7 @@ installed `newtonnet` or `torchmdnet` Python packages. Numerical dependencies
 | `newtonnet/` | https://github.com/MoriyaSuwako2524/NewtonNet | `b3214ea870d9c15cd07e4b970f113bdeaed2a69d` | Regents license, see `newtonnet/LICENSE` |
 | `torchmdnet/` | https://github.com/MoriyaSuwako2524/torchmd-net | `c162e4f1ffcdef0baae9e283d92d7cf5a366b74b` | MIT, see `torchmdnet/LICENSE` |
 | `mace/` | https://github.com/ACEsuit/mace/tree/v0.3.16 | Official `mace-torch==0.3.16` wheel | MIT, see `mace/LICENSE.md` |
+| `uma/predictor.py` | https://github.com/facebookresearch/fairchem | `fairchem_core-2.17.0` (`be54a56`), adapted inference head and normalization | MIT, see `uma/LICENSE` |
 
 The NewtonNet license grants use, copying, modification and distribution for
 educational, research and not-for-profit purposes. The project's MIT declaration

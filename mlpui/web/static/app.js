@@ -41,8 +41,8 @@ function payload() {
     if(['energy','forces','charges'].includes(key) && !(key in weights)) continue;
     if(text('file-'+key)) files[key]=text('file-'+key);
   }
-  for(const key of Object.keys(weights)) if(selected?!selected.summary.fields.includes(key):!files[key]) throw new Error('Dataset is missing '+key+' Labels');
-  const train=selected?structuredClone(selected.spec):{directory:text('directory'),files,gradients:$('gradients').checked,energy_scale:number('energy-scale'),length_scale:number('length-scale')};
+  for(const key of Object.keys(weights)) if(selected?!selected.summary.fields.includes(key):!files[key]) throw new Error('Dataset is missing '+key+' labels');
+  const train=selected?{...structuredClone(selected.spec),dataset_id:selected.id,dataset_name:selected.name}:{directory:text('directory'),files,gradients:$('gradients').checked,energy_scale:number('energy-scale'),length_scale:number('length-scale')};
   if(!selected&&groups('shards').length) train.shards=groups('shards');
   let model;
   try { model=JSON.parse($('model-config').value); } catch { throw new Error('Model configuration is not valid JSON'); }
@@ -152,6 +152,7 @@ function renderDetail(job) {
   $('prediction-panel').hidden=!predicting;
   $('prediction-results').innerHTML=job.prediction?`<p>${job.prediction.samples} structures; energy in eV, forces in eV/angstrom. Forces are flattened; offsets identify each structure.</p>`+['energy.npy','forces.npy','offsets.npy','prediction'].map(f=>`<a href="/api/jobs/${job.id}/${f}">Download ${f==='prediction'?'metadata JSON':f}</a>`).join(''):'No completed predictions yet';
   if(predicting&&job.status==='running') $('detail-status').textContent='Predicting';
+  $('evaluation-artifacts-panel').hidden=!evaluating||predicting;
   $('download-evaluation').hidden=!job.evaluation;
   $('download-evaluation').href=`/api/jobs/${job.id}/evaluation`;
   const plots=job.evaluation?.plots;
@@ -160,6 +161,9 @@ function renderDetail(job) {
     return `<article class="evaluation-plot"><h3>${escapeHTML(key)}</h3><img src="${url}.png" alt="${escapeHTML(key)}: reference versus prediction" loading="lazy"><div><a href="${url}.png" download="${key}.png">Download PNG</a> · <a href="${url}.svg" download="${key}.svg">Download SVG</a></div></article>`;
   }).join(''):(job.evaluation?'<p class="footnote">No plots for this job. Run evaluation again to generate them.</p>':'');
   if($('evaluation-plots').innerHTML!==plotHTML) $('evaluation-plots').innerHTML=plotHTML;
+  const artifacts=job.evaluation?.artifacts;
+  const artifactFiles=artifacts?Object.keys(artifacts.files||{}):[];
+  $('evaluation-artifacts').innerHTML=artifactFiles.length?'<strong>Prediction and reference arrays</strong>'+artifactFiles.map(name=>`<a href="/api/jobs/${job.id}/artifacts/${encodeURIComponent(name)}" download="${escapeHTML(name)}">${escapeHTML(name)} &#8595;</a>`).join('')+`<a href="/api/jobs/${job.id}/artifacts/${encodeURIComponent(artifacts.manifest)}" download="metadata.json">metadata.json &#8595;</a>`:(job.evaluation?'<span class="muted">No exported arrays</span>':'');
   $('evaluation-metrics').innerHTML=job.evaluation?'<table><thead><tr><th>Metric</th><th>MAE</th><th>RMSE</th><th>MSE</th></tr></thead><tbody>'+Object.entries(job.evaluation.metrics).map(([key,m])=>`<tr><td>${escapeHTML(key)}</td><td>${m.mae.toExponential(5)}</td><td>${m.rmse.toExponential(5)}</td><td>${m.mse.toExponential(5)}</td></tr>`).join('')+'</tbody></table>':'No complete evaluation results yet';
   drawChart();
 }

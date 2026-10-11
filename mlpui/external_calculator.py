@@ -115,7 +115,7 @@ def build_external_calculator(builder, family, device):
     model = builder._get_backbone()
     return ExternalCalculator(
         family=family, model_patcher=builder.model_patcher,
-        input_adapter=AtomicInputAdapter(family, builder.length_to_angstrom, builder.charge, builder.spin,
+        input_adapter=AtomicInputAdapter(family, builder.length_to_angstrom, builder.charge, builder.spin if builder.spin is not None else 0,
                                          require_charge=getattr(model, "charge_constraint", False), model=model),
         output_adapter=AtomicOutputAdapter(builder.properties, *factors),
         properties=builder.properties, dtype=dtype, device=device,

@@ -1,6 +1,7 @@
 """Small, explicit configuration contract for the basic web interface."""
 from pathlib import Path
 import copy
+import re
 
 from mlpui.data import NpyDataset, NpyShards
 from mlpui.backends import get_backend, registered_backends
@@ -14,11 +15,13 @@ def presets():
 def backend_metadata():
     return {**{backend.name: backend.metadata() for backend in registered_backends()},
             "uma": {"label": "UMA (prediction only)", "training_targets": [],
-                    "config_hint": "Select the task supported by your checkpoint. Charge is total Q; spin is multiplicity (1 for an OMOL singlet). Optional charge/spin NPY files override these defaults. Input positions must convert to angstrom; outputs are eV and eV/angstrom."}}
+                    "config_hint": "Native UMA-s-1p2: nonperiodic molecules, omol task, at least two atoms. Charge is total Q; spin is multiplicity (1 for an OMOL singlet). Optional charge/spin NPY files override these defaults. Input positions must convert to angstrom; outputs are eV and eV/angstrom."}}
 
 def dataset(spec):
     options = copy.deepcopy(spec)
     directory = options.pop("directory")
+    options.pop("dataset_id", None)
+    options.pop("dataset_name", None)
     return (NpyShards if "shards" in options else NpyDataset)(directory, **options)
 
 
@@ -66,8 +69,15 @@ def normalize(payload):
             continue
         if not isinstance(spec, dict) or not spec.get("directory"):
             raise ValueError("A dataset directory is required")
-        if spec.keys() - {"directory", "shards", "files", "gradients", "energy_scale", "length_scale"}:
+        if spec.keys() - {"directory", "shards", "files", "gradients", "energy_scale", "length_scale",
+                          "dataset_id", "dataset_name"}:
             raise ValueError("Unsupported dataset fields")
+        if "dataset_id" in spec and (not isinstance(spec["dataset_id"], str)
+                                      or not re.fullmatch(r"[a-f0-9]{32}", spec["dataset_id"])):
+            raise ValueError("Invalid managed dataset ID")
+        if "dataset_name" in spec and (not isinstance(spec["dataset_name"], str)
+                                        or not 1 <= len(spec["dataset_name"].strip()) <= 100):
+            raise ValueError("Invalid managed dataset name")
         spec["directory"] = str(Path(spec["directory"]).expanduser().resolve())
         if "files" in spec and (not isinstance(spec["files"], dict) or
                                 not all(isinstance(k, str) and isinstance(v, str) and v

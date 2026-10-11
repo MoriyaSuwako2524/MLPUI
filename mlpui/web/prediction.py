@@ -25,9 +25,9 @@ def normalize_prediction(value):
     if not isinstance(config, dict) or set(config) - set(DEFAULT_CONFIG):
         raise ValueError("UMA settings support task, charge and spin only")
     config = {**DEFAULT_CONFIG, **config}
-    if config["task"] not in {"omol", "omat", "odac", "oc20", "oc25", "omc"}:
-        raise ValueError("Unknown UMA task")
-    for key, low, high in (("charge", -100, 100), ("spin", 0, 100)):
+    if config["task"] != "omol":
+        raise ValueError("Native UMA prediction currently supports omol only")
+    for key, low, high in (("charge", -100, 100), ("spin", 1, 100)):
         if type(config[key]) is not int or not low <= config[key] <= high:
             raise ValueError(f"UMA {key} must be an integer between {low} and {high}")
     value["model_config"] = config
@@ -43,7 +43,7 @@ def normalize_prediction(value):
     spec = value.get("prediction")
     if not isinstance(spec, dict) or not spec.get("directory"):
         raise ValueError("A prediction dataset directory is required")
-    if set(spec) - {"directory", "files", "shards", "gradients", "energy_scale", "length_scale"}:
+    if set(spec) - {"directory", "files", "shards", "gradients", "energy_scale", "length_scale", "dataset_id", "dataset_name"}:
         raise ValueError("Unsupported dataset fields")
     spec["directory"] = str(Path(spec["directory"]).expanduser().resolve())
     if "files" in spec and (not isinstance(spec["files"], dict) or
@@ -54,7 +54,11 @@ def normalize_prediction(value):
         raise ValueError("Groups must be a nonempty list of names")
     # Validate every structure, including per-structure charge and multiplicity.
     for sample in dataset(spec):
-        for key, low, high in (("charge", -100, 100), ("spin", 0, 100)):
+        if np.any(sample.get("pbc", False)):
+            raise ValueError("Native UMA prediction requires nonperiodic molecules")
+        if len(sample["z"]) < 2:
+            raise ValueError("UMA WebUI requires at least two atoms per structure; isolated atom references are not configured")
+        for key, low, high in (("charge", -100, 100), ("spin", 1, 100)):
             number = np.asarray(sample.get(key, config[key])).item()
             if not np.isfinite(number) or number != int(number) or not low <= number <= high:
                 raise ValueError(f"UMA {key} must be an integer between {low} and {high}")
@@ -62,14 +66,11 @@ def normalize_prediction(value):
 
 
 def build_calculator(checkpoint, task, device):
-    """Use the complete official predictor, including heads and normalization."""
-    try:
-        from fairchem.core import FAIRChemCalculator
-        from fairchem.core.units.mlip_unit import load_predict_unit
-    except ImportError as exc:
-        raise RuntimeError("UMA prediction requires fairchem-core. Install fairchem-core and psutil in a separate environment, then set MLPUI_UMA_PYTHON to its Python executable before starting WebUI. See docs/uma-prediction.md.") from exc
-    predictor = load_predict_unit(path=checkpoint, device=device, inference_settings="default")
-    return FAIRChemCalculator(predictor, task_name=task)
+    """Use the bundled complete predictor, including heads and normalization."""
+    import torch
+    from mlpui.calculator import CalculatorBuilder
+    return CalculatorBuilder.from_checkpoint(checkpoint, family="uma", task=task,
+        charge=0, spin=1, device=device, dtype=torch.float32).build()
 
 
 def run_prediction(settings, folder, device, progress, should_stop):
@@ -86,6 +87,7 @@ def run_prediction(settings, folder, device, progress, should_stop):
         atoms = NpyDataset.atoms(sample)
         for key in ("charge", "spin"):
             atoms.info[key] = int(np.asarray(sample.get(key, config[key])).item())
+            setattr(calculator, key, atoms.info[key])
         calculator.calculate(atoms, properties=["energy", "forces"])
         energy = float(calculator.results["energy"])
         force = np.asarray(calculator.results["forces"])
