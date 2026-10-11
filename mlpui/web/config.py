@@ -7,11 +7,14 @@ from mlpui.backends import get_backend, registered_backends
 
 
 def presets():
-    return {backend.name: backend.default_config() for backend in registered_backends()}
+    from mlpui.web.prediction import DEFAULT_CONFIG
+    return {**{backend.name: backend.default_config() for backend in registered_backends()}, "uma": dict(DEFAULT_CONFIG)}
 
 
 def backend_metadata():
-    return {backend.name: backend.metadata() for backend in registered_backends()}
+    return {**{backend.name: backend.metadata() for backend in registered_backends()},
+            "uma": {"label": "UMA (prediction only)", "training_targets": [],
+                    "config_hint": "Select the task supported by your checkpoint. Charge is total Q; spin is multiplicity (1 for an OMOL singlet). Optional charge/spin NPY files override these defaults. Input positions must convert to angstrom; outputs are eV and eV/angstrom."}}
 
 def dataset(spec):
     options = copy.deepcopy(spec)
@@ -25,6 +28,11 @@ def normalize(payload):
     value = copy.deepcopy(payload)
     if not isinstance(value, dict):
         raise ValueError("Expected a configuration object")
+    if value.get("task_type") == "prediction":
+        from mlpui.web.prediction import normalize_prediction
+        return normalize_prediction(value)
+    if value.get("family") == "uma":
+        raise ValueError("Select UMA prediction to use UMA; training and evaluation are not supported")
     allowed = {"name", "family", "model_config", "training", "train", "validation", "test", "checkpoint", "task_type", "evaluation"}
     if value.keys() - allowed:
         raise ValueError("Unsupported configuration fields")
@@ -90,12 +98,17 @@ def normalize(payload):
             if coordinate_files(value[first]) & coordinate_files(value[second]):
                 raise ValueError(f"{first} and {second} data must be separate")
     if options.get("early_stopping", False) and (evaluating or not value.get("validation")):
-        raise ValueError("早停只适用于训练，并且必须提供独立验证集")
+        raise ValueError("Early stopping requires training with a separate validation set")
     return value
 
 
 def inspect_data(settings):
     result = {}
+    if settings.get("task_type") == "prediction":
+        data = dataset(settings["prediction"])
+        fields = data.fields if isinstance(data, NpyShards) else data.arrays.keys()
+        return {"prediction": {"samples": len(data), "groups": len(data.datasets) if isinstance(data, NpyShards) else 1,
+                               "fields": sorted(fields), "first_atoms": len(data[0]["z"])}}
     labels = set(settings["training"].get("loss_weights", {"energy": 1, "forces": 1}))
     model_config = get_backend(settings["family"]).settings(settings["model_config"])
     if model_config.get("charge_constraint", False):

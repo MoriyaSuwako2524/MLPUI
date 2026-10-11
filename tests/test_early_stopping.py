@@ -71,7 +71,7 @@ def test_missing_validation_and_invalid_parameters(tmp_path):
             TrainingConfig(**kwargs)
     config = settings(tmp_path)
     config['training']['early_stopping'] = True
-    with pytest.raises(ValueError, match='验证集'):
+    with pytest.raises(ValueError, match='validation set'):
         normalize(config)
 
 

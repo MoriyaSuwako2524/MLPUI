@@ -122,7 +122,7 @@ class JobManager:
                 candidates = ["cpu"] if requested == "cpu" else [g["device"] for g in gpus if g["idle"] and requested in ("cuda", g["device"])]
                 device = next((d for d in candidates if d not in occupied), None)
                 if device is None:
-                    state.update(queue_position=position, queue_reason=("GPU 检测暂不可用，等待重试" if probe_error else "等待空闲 GPU") if requested.startswith("cuda") else "等待 CPU 任务完成")
+                    state.update(queue_position=position, queue_reason=("GPU detection unavailable; retrying" if probe_error else "Waiting for a free GPU") if requested.startswith("cuda") else "Waiting for the CPU job to finish")
                     write_json(self.folder(state["id"]) / "status.json", state)
                     continue
                 self.launch(state, device)
@@ -144,7 +144,8 @@ class JobManager:
         try:
             with (folder / "train.log").open("wb") as log:
                 self.processes[job_id] = subprocess.Popen(
-                    [sys.executable, "-u", "-m", "mlpui.web.worker", str(folder)],
+                    [env.get("MLPUI_UMA_PYTHON", sys.executable) if state.get("task_type") == "prediction" else sys.executable,
+                     "-u", "-m", "mlpui.web.worker", str(folder)],
                     stdout=log, stderr=subprocess.STDOUT, env=env,
                     creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0)
             self.allocations[job_id] = device
@@ -242,7 +243,7 @@ def make_server(root, port=8675, host="127.0.0.1"):
                     import torch
                     return self.respond({"models": presets(), "backends": backend_metadata(), "cuda": torch.cuda.is_available(),
                                          "root": str(manager.root)})
-                match = re.fullmatch(r"/api/jobs/([a-f0-9]{32})(?:/(log|config|evaluation|model|best|plots/(?:energy|forces|charges|dipole|stress)\.(?:png|svg)|checkpoints/epoch_[0-9]{6,}\.pt))?", path)
+                match = re.fullmatch(r"/api/jobs/([a-f0-9]{32})(?:/(log|config|evaluation|prediction|(?:energy|forces|offsets)\.npy|model|best|plots/(?:energy|forces|charges|dipole|stress)\.(?:png|svg)|checkpoints/epoch_[0-9]{6,}\.pt))?", path)
                 if match:
                     job_id, action = match.groups()
                     folder = manager.folder(job_id)
@@ -256,8 +257,8 @@ def make_server(root, port=8675, host="127.0.0.1"):
                         return self.respond({"text": text})
                     if action == "config":
                         return self.respond(read_json(folder / "config.json"))
-                    if action == "evaluation":
-                        return self.respond(read_json(folder / "evaluation.json"))
+                    if action in ("evaluation", "prediction"):
+                        return self.respond(read_json(folder / (action + ".json")))
                     if action and action.startswith("plots/"):
                         file = folder / action
                         content = file.read_bytes()
@@ -268,8 +269,12 @@ def make_server(root, port=8675, host="127.0.0.1"):
                         self.end_headers()
                         self.wfile.write(content)
                         return
-                    if action in ("model", "best") or (action and action.startswith("checkpoints/")):
-                        if action == "model":
+                    if action in ("model", "best", "energy.npy", "forces.npy", "offsets.npy") or (action and action.startswith("checkpoints/")):
+                        if action in ("energy.npy", "forces.npy", "offsets.npy"):
+                            if manager.get(job_id)["status"] != "completed":
+                                raise ValueError("Prediction is not ready")
+                            file = folder / action
+                        elif action == "model":
                             if manager.get(job_id)["status"] not in {"completed", "stopped"}:
                                 raise ValueError("Model is not ready")
                             file = folder / "model.pt"
@@ -334,7 +339,7 @@ def make_server(root, port=8675, host="127.0.0.1"):
                             specs = []
                             for job in manager.list():
                                 config = read_json(manager.folder(job["id"]) / "config.json")
-                                specs.extend(config[key] for key in ("train", "validation", "test", "evaluation") if config.get(key))
+                                specs.extend(config[key] for key in ("train", "validation", "test", "evaluation", "prediction") if config.get(key))
                             return self.respond(datasets.delete(identifier, payload, job_specs=specs))
                     if action == "inspect":
                         return self.respond(datasets.inspect(identifier))

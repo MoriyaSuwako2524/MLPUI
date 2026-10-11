@@ -100,6 +100,17 @@ def run(folder):
         if device.startswith("cuda"):
             torch.cuda.set_device(device)
         from mlpui.training import Trainer, TrainingConfig, TrainingStopped
+        if settings.get("task_type") == "prediction":
+            from mlpui.web.prediction import run_prediction
+            try:
+                result = run_prediction(settings, folder, device, progress, lambda: (folder / "stop").exists())
+            except TrainingStopped:
+                publish(status="stopped", phase="stopped")
+                return
+            write_json(folder / "prediction.json", result)
+            publish(status="completed", phase="completed", completed=result["samples"],
+                    total=result["samples"], prediction=result)
+            return
         from mlpui.web.config import dataset
         options = dict(settings.get("training", {}))
         options["device"] = device

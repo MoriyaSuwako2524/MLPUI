@@ -33,6 +33,8 @@ np.save(folder / 'pos.npy', [[[0., 0., 0.], [1., 0., 0.]]])
 np.save(folder / 'energy.npy', [0.1])
 np.save(folder / 'forces.npy', np.zeros((1, 2, 3)))
 for family, config in presets().items():
+    if family == 'uma':
+        continue  # UMA is an optional inference runtime, not a bundled trainer.
     if family == 'newtonnet':
         config.update(n_features=8, n_basis=4, n_interactions=1)
     elif family == 'torchmdnet':

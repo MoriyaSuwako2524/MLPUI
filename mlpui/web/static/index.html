@@ -1,133 +1,134 @@
 <!doctype html>
-<html lang="zh-CN">
+<html lang="en">
 <head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>MLPUI · Training Studio</title><link rel="stylesheet" href="/style.css"><script src="/app.js" defer></script><script src="/datasets.js" defer></script></head>
 <body>
 <aside>
   <a class="brand" href="#jobs"><span class="mark">M</span><span>MLPUI<small>TRAINING STUDIO</small></span></a>
-  <div class="nav-label">工作空间</div>
-  <a class="nav active" id="nav-jobs" href="#jobs"><span>▦</span> 任务列表</a>
-  <a class="nav" id="nav-new" href="#new"><span>＋</span> 新建任务</a>
-  <a class="nav" id="nav-datasets" href="#datasets"><span>▤</span> 数据集</a>
-  <div class="side-bottom"><span class="dot"></span> 本地工作空间<small>Machine learning potentials<br>NumPy → Train → Model</small></div>
+  <div class="nav-label">Workspace</div>
+  <a class="nav active" id="nav-jobs" href="#jobs"><span>▦</span> Jobs</a>
+  <a class="nav" id="nav-new" href="#new"><span>＋</span> New job</a>
+  <a class="nav" id="nav-datasets" href="#datasets"><span>▤</span> Dataset</a>
+  <div class="side-bottom"><span class="dot"></span> Local workspace<small>Machine learning potentials<br>NumPy → Train → Model</small></div>
 </aside>
 <main>
-  <header><span>工作空间 <span class="muted">/</span> <span id="breadcrumb">训练任务</span></span><span id="connection" class="connection">正在连接…</span></header>
+  <header><span>Workspace <span class="muted">/</span> <span id="breadcrumb">Training jobs</span></span><span id="connection" class="connection">Connecting...</span></header>
   <div id="notice" role="alert" hidden></div>
   <section id="jobs-view">
-    <div class="page-title"><div><div class="eyebrow">YOUR EXPERIMENTS</div><h1>训练与评估</h1><p>从分子数据到你的下一个势能模型。</p></div><a class="button primary" href="#new">＋ 新建任务</a></div>
-    <div class="stats"><div><span>全部任务</span><strong id="count-all">0</strong></div><div><span><i class="dot purple"></i> 运行中</span><strong id="count-active">0</strong></div><div><span>排队中</span><strong id="count-queued">0</strong></div><div><span><i class="dot"></i> 已完成</span><strong id="count-done">0</strong></div></div>
-    <div class="panel"><div class="panel-heading"><h2>最近任务</h2><span class="muted">自动调度 · 空闲 GPU 并行，忙时排队</span></div><div id="job-list"></div></div>
+    <div class="page-title"><div><div class="eyebrow">YOUR EXPERIMENTS</div><h1>Training and inference</h1><p>Build your next interatomic potential from molecular data.</p></div><a class="button primary" href="#new">＋ New job</a></div>
+    <div class="stats"><div><span>All jobs</span><strong id="count-all">0</strong></div><div><span><i class="dot purple"></i> Running</span><strong id="count-active">0</strong></div><div><span>Queued</span><strong id="count-queued">0</strong></div><div><span><i class="dot"></i> Completed</span><strong id="count-done">0</strong></div></div>
+    <div class="panel"><div class="panel-heading"><h2>Recent jobs</h2><span class="muted">Automatic scheduling: parallel on free GPUs, queued when busy</span></div><div id="job-list"></div></div>
     <p class="footnote" id="runs-root"></p>
   </section>
   <section id="datasets-view" hidden>
-    <div class="page-title"><div><div class="eyebrow">DATA LIBRARY</div><h1>数据集</h1><p>登记、上传和划分分子数据，在任务中重复使用。</p></div><button id="dataset-new" class="primary">＋ 添加数据集</button></div>
+    <div class="page-title"><div><div class="eyebrow">DATA LIBRARY</div><h1>Dataset</h1><p>Register, upload and split molecular datasets for reuse across jobs.</p></div><button id="dataset-new" class="primary">＋ Add dataset</button></div>
     <div class="panel form-panel" id="dataset-create-panel" hidden>
-      <h2>添加数据集</h2><form id="dataset-form"><div class="grid two">
-        <label>名称<input id="dataset-name" required maxlength="100"></label><label>标签<input id="dataset-tags-new" placeholder="例如 CM, DFT, v1；逗号分隔"></label>
-        <label>来源<select id="dataset-source"><option value="existing">服务器已有目录</option><option value="upload">从本机上传 NPY 文件</option></select></label>
-        <label class="wide" id="dataset-directory-label">服务器目录<input id="dataset-directory" placeholder="/scratch/.../npys" required></label>
-        <label class="wide" id="dataset-upload-label" hidden>选择 NPY 文件<input id="dataset-files" type="file" accept=".npy" multiple><small>可一次选择多个文件，保留文件名；单文件最大 20 GiB，上传到 WebUI 所在机器。</small></label>
-        <label>命名方式<select id="dataset-layout"><option value="standard">标准名称 · z.npy / pos.npy</option><option value="qm">QM 分组 · qm_coord_{shard}.npy</option><option value="custom">自定义文件映射</option></select></label>
-        <label>分组<input id="dataset-shards" placeholder="无分组留空；例如 w00, w01"></label>
+      <h2>Add dataset</h2><form id="dataset-form"><div class="grid two">
+        <label>Name<input id="dataset-name" required maxlength="100"></label><label>Tags<input id="dataset-tags-new" placeholder="e.g. CM, DFT, v1; comma-separated"></label>
+        <label>Source<select id="dataset-source"><option value="existing">Existing server directory</option><option value="upload">Upload local NPY files</option></select></label>
+        <label class="wide" id="dataset-directory-label">Server directory<input id="dataset-directory" placeholder="/scratch/.../npys" required></label>
+        <label class="wide" id="dataset-upload-label" hidden>Select NPY files<input id="dataset-files" type="file" accept=".npy" multiple><small>Select multiple files. Filenames are preserved; maximum 20 GiB per file. Uploads go to the WebUI server.</small></label>
+        <label>Naming convention<select id="dataset-layout"><option value="standard">Standard names · z.npy / pos.npy</option><option value="qm">QM groups · qm_coord_{shard}.npy</option><option value="custom">Custom file mapping</option></select></label>
+        <label>Groups<input id="dataset-shards" placeholder="Leave blank for ungrouped data; e.g. w00, w01"></label>
       </div>
-      <details id="dataset-mapping-details"><summary>文件映射与单位</summary><p class="hint">留空或 {} 自动读取标准字段。自定义映射仅填写实际存在的字段，支持 {shard}。charges 是原子电荷，charge 是结构总电荷。</p>
-        <label>字段与文件名 JSON<textarea id="dataset-mapping" rows="7" spellcheck="false">{}</textarea></label>
-        <div class="grid two"><label>能量换算倍数<input id="dataset-energy-scale" type="number" step="any" value="1"></label><label>长度换算倍数<input id="dataset-length-scale" type="number" step="any" value="1"></label></div>
-        <label class="check"><input id="dataset-gradients" type="checkbox">力文件存储的是梯度（自动取负号）</label>
+      <details id="dataset-mapping-details"><summary>File mapping and units</summary><p class="hint">Leave blank or use {} for standard fields. Map only existing fields; {shard} is supported. charges means atomic charges; charge means total structure charge.</p>
+        <label>Field-to-filename JSON<textarea id="dataset-mapping" rows="7" spellcheck="false">{}</textarea></label>
+        <div class="grid two"><label>Energy scale<input id="dataset-energy-scale" type="number" step="any" value="1"></label><label>Length scale<input id="dataset-length-scale" type="number" step="any" value="1"></label></div>
+        <label class="check"><input id="dataset-gradients" type="checkbox">Force files contain gradients (negate on read)</label>
       </details>
-      <div class="preview-row"><button id="dataset-save" class="primary" type="submit">检查并添加</button><button id="dataset-cancel" type="button">收起</button><span id="dataset-progress" role="status"></span></div>
+      <div class="preview-row"><button id="dataset-save" class="primary" type="submit">Check and add</button><button id="dataset-cancel" type="button">Close</button><span id="dataset-progress" role="status"></span></div>
       </form>
     </div>
-    <div class="dataset-toolbar"><label>搜索<input id="dataset-search" placeholder="名称、字段或路径"></label><label>按标签筛选<select id="dataset-tag-filter"><option value="">全部标签</option></select></label><label class="check"><input type="checkbox" id="dataset-show-archived">显示归档</label></div>
+    <div class="dataset-toolbar"><label>Search<input id="dataset-search" placeholder="Name, field or path"></label><label>Filter by tag<select id="dataset-tag-filter"><option value="">All tags</option></select></label><label class="check"><input type="checkbox" id="dataset-show-archived">Show archived</label></div>
     <div id="dataset-list"></div>
     <div class="panel form-panel" id="dataset-detail" hidden>
       <h2 id="dataset-detail-title"></h2><p id="dataset-detail-info" class="footnote"></p>
-      <div class="preview-row"><input id="dataset-rename" aria-label="数据集新名称" maxlength="100"><button id="dataset-rename-save">保存名称</button><button id="dataset-archive">归档</button><button id="dataset-inspect">重新检查</button></div>
-      <div class="preview-row"><label>标签<input id="dataset-tags-edit" placeholder="逗号分隔；留空清除"></label><button id="dataset-tags-save">保存标签</button></div>
-      <details id="dataset-delete-panel"><summary>删除数据集</summary><p id="dataset-delete-info" class="hint"></p><label class="check"><input type="checkbox" id="dataset-delete-files">同时永久删除此数据集的托管 NPY 文件</label><p class="hint">默认只删除库中的记录。文件删除不可撤销；任务或其他数据集引用的文件不能删除。</p><button id="dataset-delete-confirm" class="danger" type="button">确认删除此数据集</button></details>
+      <div class="preview-row"><input id="dataset-rename" aria-label="New dataset name" maxlength="100"><button id="dataset-rename-save">Save name</button><button id="dataset-archive">Archive</button><button id="dataset-inspect">Recheck</button></div>
+      <div class="preview-row"><label>Tags<input id="dataset-tags-edit" placeholder="Comma-separated; leave blank to clear"></label><button id="dataset-tags-save">Save tags</button></div>
+      <details id="dataset-delete-panel"><summary>Delete dataset</summary><p id="dataset-delete-info" class="hint"></p><label class="check"><input type="checkbox" id="dataset-delete-files">Also permanently delete managed NPY files</label><p class="hint">By default, only the catalog entry is removed. File deletion is permanent; files referenced by jobs or other datasets cannot be deleted.</p><button id="dataset-delete-confirm" class="danger" type="button">Confirm dataset deletion</button></details>
       <div id="dataset-file-list" class="table-wrap"></div>
-      <p class="hint">归档仅隐藏目录记录，保留原文件和已创建的任务。</p>
-      <details id="dataset-split-details"><summary>基于此数据集重新划分</summary>
+      <p class="hint">Archiving hides the catalog entry and preserves files and existing jobs.</p>
+      <details id="dataset-split-details"><summary>Split this dataset</summary>
         <form id="dataset-split-form"><div class="grid three">
-          <label class="wide">划分名称<input id="dataset-split-name" required maxlength="80" placeholder="例如 experiment-v1"></label>
-          <label>训练比例<input id="dataset-train-ratio" type="number" value="80" min="0" step="any"></label>
-          <label>验证比例<input id="dataset-validation-ratio" type="number" value="10" min="0" step="any"></label>
-          <label>测试比例<input id="dataset-test-ratio" type="number" value="10" min="0" step="any"></label>
-          <label>划分方式<select id="dataset-split-method"><option value="random">随机打乱结构</option><option value="ordered">按原顺序切分</option></select></label>
-          <label>随机种子<input id="dataset-split-seed" type="number" value="0" min="0" max="4294967295"></label>
-        </div><p class="hint">比例按相对权重分配，0 表示不生成该子集。创建独立 npy 副本并保存索引，原数据保持不变。相关轨迹建议按原顺序切分或分别登记不同分组，以避免相邻帧泄漏。</p>
-        <div class="preview-row"><button id="dataset-split-save" class="primary" type="submit">生成划分</button><span id="dataset-split-progress" role="status"></span></div></form>
+          <label class="wide">Split name<input id="dataset-split-name" required maxlength="80" placeholder="e.g. experiment-v1"></label>
+          <label>Training ratio<input id="dataset-train-ratio" type="number" value="80" min="0" step="any"></label>
+          <label>Validation ratio<input id="dataset-validation-ratio" type="number" value="10" min="0" step="any"></label>
+          <label>Test ratio<input id="dataset-test-ratio" type="number" value="10" min="0" step="any"></label>
+          <label>Split method<select id="dataset-split-method"><option value="random">Shuffle structures</option><option value="ordered">Split in original order</option></select></label>
+          <label>Random seed<input id="dataset-split-seed" type="number" value="0" min="0" max="4294967295"></label>
+        </div><p class="hint">Ratios are relative weights; 0 omits a subset. Creates separate NPY copies and saves indices, preserving source data. For correlated trajectories, use ordered splits or separate groups to avoid neighboring-frame leakage.</p>
+        <div class="preview-row"><button id="dataset-split-save" class="primary" type="submit">Create split</button><span id="dataset-split-progress" role="status"></span></div></form>
       </details>
     </div>
   </section>
   <section id="new-view" hidden>
-    <div class="page-title"><div><div class="eyebrow">NEW EXPERIMENT</div><h1>创建训练任务</h1><p>选择模型，连接 NumPy 数据，然后开始训练。</p></div><a class="button" href="#jobs">返回任务</a></div>
+    <div class="page-title"><div><div class="eyebrow">NEW EXPERIMENT</div><h1>Create training job</h1><p>Select a model, connect NumPy data and start training.</p></div><a class="button" href="#jobs">Back to jobs</a></div>
     <form id="training-form">
       <div class="form-layout"><div>
-      <div class="panel form-panel"><h2><b class="step">01</b> 模型与任务</h2><div class="grid two">
-        <label class="wide">任务类型<select id="task-type"><option value="training">训练</option><option value="evaluation">评估已有模型</option></select></label>
-        <label>任务名称<input id="name" required maxlength="100" placeholder="例如 chorismate-newtonnet"></label>
-        <label>模型<select id="family" aria-label="模型后端"></select></label>
-        <label class="wide">训练方式<select id="training-mode"><option value="scratch">从头训练</option><option value="continue">从已有 .pt 模型继续训练</option></select><small>继续训练会加载已有权重；优化器、epoch 和早停计数重新开始，结果保存到新任务目录。</small></label>
-        <label class="wide">模型路径 <span class="optional" id="checkpoint-hint">继续训练或评估时必填</span><input id="checkpoint" placeholder="/path/to/model.pt 或 best.pt"><small>填写 WebUI 所在机器的路径；模型类型和下方结构配置须与原模型一致。</small></label>
-      </div><details><summary>模型结构配置</summary><p class="hint" id="model-config-hint">从头训练可用默认值；微调时需与原模型结构一致。</p><textarea id="model-config" rows="12" spellcheck="false" aria-label="模型结构 JSON"></textarea></details></div>
-      <div class="panel form-panel"><h2><b class="step">02</b> NumPy 数据</h2><div class="grid two">
-        <label class="wide">从数据集库选择<select id="managed-train"><option value="">手动填写路径和文件映射</option></select><small>选择后使用已登记的数据和单位配置。</small></label>
-        <label>验证数据集<select id="managed-validation"><option value="">使用下方手动配置 / 不使用</option></select></label>
-        <label>测试数据集<select id="managed-test"><option value="">使用下方手动配置 / 不使用</option></select></label>
-        <label class="wide">数据目录<input id="directory" required placeholder="/scratch/moriya/codex/chorismate_mutase/calc1/npys"><small>填写 WebUI 所在机器的路径。</small></label>
-        <label class="wide">文件命名<select id="layout"><option value="pete">QM 窗口 · qm_coord_w00.npy</option><option value="standard">标准文件 · z.npy / pos.npy</option><option value="custom">自定义映射</option></select></label>
-        <label>数据分组<input id="shards" value="w00, w01" placeholder="w00, w01"><small>逗号分隔；没有分组时留空。</small></label>
-        <label>验证分组 <span class="optional">可选</span><input id="validation-shards" placeholder="例如 w02"></label>
-        <label class="wide">验证数据目录 <span class="optional">可选</span><input id="validation-directory" placeholder="分组验证可留空，使用同一数据目录"></label>
-        <label>测试分组 <span class="optional">可选</span><input id="test-shards" placeholder="例如 w03, w04"></label>
-        <label>测试数据目录 <span class="optional">可选</span><input id="test-directory" placeholder="分组测试可留空，使用同一数据目录"></label>
-        <p id="split-hint" class="hint wide">测试集采用相同文件映射和单位，须与训练、验证数据分开；仅评估，不更新权重。</p>
-      </div><details id="file-details"><summary>文件映射与单位</summary><p class="hint">{shard} 会替换成分组名。公共原子类型文件无需占位符。</p><div class="grid two">
-        <label>原子类型<input id="file-z" value="full_qm_type.npy" required></label><label>坐标<input id="file-pos" value="qm_coord_{shard}.npy" required></label>
-        <label>能量<input id="file-energy" value="energy_{shard}.npy"></label><label>力 / 梯度<input id="file-forces" value="qm_grad_{shard}.npy"></label>
-        <label>原子电荷标签<input id="file-charges" value="qm_charge_{shard}.npy"><small>可选；标准格式 charges.npy。形状 [结构数, 原子数] 或末尾加 1；单位 e。</small></label>
-        <label>每个结构的总电荷 Q<input id="file-charge" value="total_charge_{shard}.npy"><small>硬约束必填；标准格式 charge.npy，形状 [结构数] 或 [结构数, 1]，单位 e。</small></label>
-        <label>晶胞 <span class="optional">可选</span><input id="file-cell" placeholder="cell_{shard}.npy"></label><label>周期性 <span class="optional">可选</span><input id="file-pbc" placeholder="pbc_{shard}.npy"></label>
-        <label>原子索引 offsets <span class="optional">变原子数时填写</span><input id="file-offsets" placeholder="offsets.npy"></label>
-        <label>能量换算系数<input id="energy-scale" type="number" value="1" min="0.000000000001" step="any" required></label>
-        <label>长度换算系数<input id="length-scale" type="number" value="1" min="0.000000000001" step="any" required></label>
-      </div><label class="check"><input type="checkbox" id="gradients" checked> 标签是能量梯度，读取时取负号转为力</label><p class="hint">系数 1 保留原始单位。请按数据生成流程确认单位。</p></details>
-      <div class="preview-row"><button type="button" id="preview">检查数据</button><span id="preview-result" role="status">检查文件、数组形状与标签。</span></div></div>
-      <div class="panel form-panel"><h2><b class="step">03</b> 运行参数</h2><div class="grid three">
-        <label id="eval-energy-label" hidden><input id="eval-energy" type="checkbox" checked>评估能量</label>
-        <label id="eval-forces-label" hidden><input id="eval-forces" type="checkbox" checked>评估力</label>
-        <label id="eval-charges-label" hidden><input id="eval-charges" type="checkbox">评估原子电荷</label>
-        <label class="check"><input id="charge-constraint" type="checkbox">总电荷硬约束<small>每个结构的原子电荷之和固定为给定 Q；需在文件映射中提供总电荷 npy，不能留空默认中性。</small></label>
-        <label class="check"><input id="train-charges" type="checkbox">训练原子电荷预测<small>默认关闭；自动添加电荷输出头。请填写原子电荷 npy 标签；已有模型须包含匹配的电荷权重。</small></label>
-        <label>原子电荷损失权重<input id="weight-charges" type="number" value="1" min="0.000000000001" step="any" required><small>仅勾选电荷预测时使用。</small></label>
+      <div class="panel form-panel"><h2><b class="step">01</b> Model and job</h2><div class="grid two">
+        <label class="wide">Job type<select id="task-type"><option value="training">Training</option><option value="prediction">UMA prediction</option><option value="evaluation">Evaluate existing model</option></select></label>
+        <label>Job name<input id="name" required maxlength="100" placeholder="e.g. chorismate-newtonnet"></label>
+        <label>Model<select id="family" aria-label="Model backend"></select></label>
+        <label class="wide">Training mode<select id="training-mode"><option value="scratch">Train from scratch</option><option value="continue">Continue from an existing .pt model</option></select><small>Loads existing weights. Optimizer, epoch and early-stopping counters restart. Results are saved in a new job directory.</small></label>
+        <label class="wide">Model path <span class="optional" id="checkpoint-hint">Required for continuation or evaluation</span><input id="checkpoint" placeholder="/path/to/model.pt or best.pt"><small>Use a path on the WebUI server. Model family and architecture must match the checkpoint.</small></label>
+      </div><details><summary>Model configuration</summary><p class="hint" id="model-config-hint">Defaults work for new models; fine-tuning requires the original architecture.</p><textarea id="model-config" rows="12" spellcheck="false" aria-label="Model configuration JSON"></textarea></details></div>
+      <div class="panel form-panel"><h2><b class="step">02</b> NumPy data</h2><div class="grid two">
+        <label class="wide">Select from dataset library<select id="managed-train"><option value="">Enter paths and file mapping manually</option></select><small>Uses the registered data and unit settings.</small></label>
+        <label>Validation dataset<select id="managed-validation"><option value="">Use manual settings below / none</option></select></label>
+        <label>Test dataset<select id="managed-test"><option value="">Use manual settings below / none</option></select></label>
+        <label class="wide">Data directory<input id="directory" required placeholder="/scratch/moriya/codex/chorismate_mutase/calc1/npys"><small>Use a path on the WebUI server.</small></label>
+        <label class="wide">File naming<select id="layout"><option value="pete">QM windows · qm_coord_w00.npy</option><option value="standard">Standard files · z.npy / pos.npy</option><option value="custom">Custom mapping</option></select></label>
+        <label>Data groups<input id="shards" value="w00, w01" placeholder="w00, w01"><small>Comma-separated; leave blank for ungrouped data.</small></label>
+        <label>Validation groups <span class="optional">Optional</span><input id="validation-shards" placeholder="e.g. w02"></label>
+        <label class="wide">Validation data directory <span class="optional">Optional</span><input id="validation-directory" placeholder="Leave blank to use groups in the main directory"></label>
+        <label>Test groups <span class="optional">Optional</span><input id="test-shards" placeholder="e.g. w03, w04"></label>
+        <label>Test data directory <span class="optional">Optional</span><input id="test-directory" placeholder="Leave blank to use groups in the main directory"></label>
+        <p id="split-hint" class="hint wide">Test data uses the same mapping and units. Keep it separate from training and validation. Testing does not update weights.</p>
+      </div><details id="file-details"><summary>File mapping and units</summary><p class="hint">{shard} is replaced with the group name. Shared atomic-number files need no placeholder.</p><div class="grid two">
+        <label>Atomic numbers<input id="file-z" value="full_qm_type.npy" required></label><label>Positions<input id="file-pos" value="qm_coord_{shard}.npy" required></label>
+        <label>Energy<input id="file-energy" value="energy_{shard}.npy"></label><label>Forces / gradients<input id="file-forces" value="qm_grad_{shard}.npy"></label>
+        <label>Atomic charge labels<input id="file-charges" value="qm_charge_{shard}.npy"><small>Optional: charges.npy with shape [structures, atoms] or [structures, atoms, 1], in e.</small></label>
+        <label>Total charge Q per structure<input id="file-charge" value="total_charge_{shard}.npy"><small>Required for the hard constraint: charge.npy with shape [structures] or [structures, 1], in e.</small></label>
+        <label>Spin multiplicity NPY (UMA; optional)<input id="file-spin" placeholder="spin.npy"></label><label>Cell <span class="optional">Optional</span><input id="file-cell" placeholder="cell_{shard}.npy"></label><label>Periodicity <span class="optional">Optional</span><input id="file-pbc" placeholder="pbc_{shard}.npy"></label>
+        <label>Atom offsets <span class="optional">Required for variable atom counts</span><input id="file-offsets" placeholder="offsets.npy"></label>
+        <label>Energy scale<input id="energy-scale" type="number" value="1" min="0.000000000001" step="any" required></label>
+        <label>Length scale<input id="length-scale" type="number" value="1" min="0.000000000001" step="any" required></label>
+      </div><label class="check"><input type="checkbox" id="gradients" checked> Labels are energy gradients; negate on read to obtain forces</label><p class="hint">A scale of 1 preserves source units. Verify units from the data generation workflow.</p></details>
+      <div class="preview-row"><button type="button" id="preview">Check data</button><span id="preview-result" role="status">Check files, array shapes and labels.</span></div></div>
+      <div class="panel form-panel"><h2><b class="step">03</b> Run settings</h2><div class="grid three">
+        <label id="eval-energy-label" hidden><input id="eval-energy" type="checkbox" checked>Evaluate energy</label>
+        <label id="eval-forces-label" hidden><input id="eval-forces" type="checkbox" checked>Evaluate forces</label>
+        <label id="eval-charges-label" hidden><input id="eval-charges" type="checkbox">Evaluate atomic charges</label>
+        <label class="check"><input id="charge-constraint" type="checkbox">Hard total-charge constraint<small>Atomic charges sum to the supplied Q. Map the total-charge NPY file explicitly, including for neutral structures.</small></label>
+        <label class="check"><input id="train-charges" type="checkbox">Train atomic charges<small>Off by default. Adds a charge head. Supply atomic-charge NPY labels; existing models must contain matching charge weights.</small></label>
+        <label>Atomic charge loss weight<input id="weight-charges" type="number" value="1" min="0.000000000001" step="any" required><small>Used only when charge prediction is enabled.</small></label>
         <label>Epochs<input id="epochs" type="number" value="10" min="1" step="1" required></label>
-        <label class="check"><input id="early-stopping" type="checkbox">启用早停<small>根据验证集判断；必须提供独立验证集。</small></label>
-        <label>早停监控指标<select id="early-monitor"><option value="loss">验证集加权总损失</option><option value="energy">验证集 Energy MSE</option><option value="forces">验证集 Forces MSE</option><option value="charges">验证集 Charges MSE</option></select></label>
-        <label>耐心轮数 Patience<input id="early-patience" type="number" value="10" min="1" step="1"><small>连续 N 轮无足够改善时停止。</small></label>
-        <label>最小改善幅度 Min delta<input id="early-min-delta" type="number" value="0" min="0" step="any"><small>绝对下降幅度；等于阈值不算改善。best.pt 保存实际最低指标的权重，model.pt 保留停止时权重。</small></label>
+        <label class="check"><input id="early-stopping" type="checkbox">Enable early stopping<small>Uses validation metrics; requires a separate validation set.</small></label>
+        <label>Early-stopping metric<select id="early-monitor"><option value="loss">Weighted validation loss</option><option value="energy">Validation set Energy MSE</option><option value="forces">Validation set Forces MSE</option><option value="charges">Validation set Charges MSE</option></select></label>
+        <label>Patience<input id="early-patience" type="number" value="10" min="1" step="1"><small>Stop after N consecutive epochs without sufficient improvement.</small></label>
+        <label>Minimum improvement (min delta)<input id="early-min-delta" type="number" value="0" min="0" step="any"><small>Absolute decrease; equality is not improvement. best.pt saves the lowest metric; model.pt saves the final weights.</small></label>
         <label>Batch size<input id="batch-size" type="number" value="4" min="1" step="1" required></label>
-        <label>学习率<input id="learning-rate" type="number" value="0.001" min="0.000000000001" step="any" required></label>
-        <label>运行设备<select id="device"><option value="cpu">CPU</option><option value="cuda">GPU · CUDA</option></select></label>
-        <label>数值精度<select id="dtype"><option value="float32">Float32</option><option value="float64">Float64</option></select></label>
-        <label>随机种子<input id="seed" type="number" value="0" min="0" step="1" required></label>
-        <label>能量损失权重<input id="weight-energy" type="number" value="1" min="0" step="any" required></label>
-        <label>力损失权重<input id="weight-forces" type="number" value="1" min="0" step="any" required></label>
-        <label>保存间隔 N（epoch）<input id="save-interval" type="number" value="10" min="0" step="1" required><small>0 表示关闭定期保存。</small></label>
-        <label>最多保留 checkpoint 数量<input id="max-checkpoints" type="number" value="3" min="1" step="1" required><small>保留最新的文件；不含最终 model.pt。</small></label>
-        <label>测试间隔 M（epoch）<input id="test-interval" type="number" value="1" min="1" step="1" required><small>填写测试集后，在 M 的倍数 epoch 评估。</small></label>
-      </div><p id="training-hint" class="hint">能量或力权重设为 0 可关闭该项；电荷由勾选框启用。每个 batch 累积多个结构的梯度。</p></div>
-      </div><div class="form-side"><div class="panel summary"><div class="eyebrow">READY WHEN YOU ARE</div><h2>开始一次实验</h2><p>数据配置、参数和运行记录会保存在独立任务目录中。</p><ul><li>训练模型或评估已有模型</li><li>实时进度、指标与日志</li><li>任务结果独立保存</li></ul><button class="primary" id="start" type="submit">开始训练 <span>→</span></button><small>任务进入后台队列，空闲 GPU 自动接续；关闭浏览器不影响队列。</small></div></div></div>
+        <label>Learning rate<input id="learning-rate" type="number" value="0.001" min="0.000000000001" step="any" required></label>
+        <label>Device<select id="device"><option value="cpu">CPU</option><option value="cuda">GPU · CUDA</option></select></label>
+        <label>Precision<select id="dtype"><option value="float32">Float32</option><option value="float64">Float64</option></select></label>
+        <label>Random seed<input id="seed" type="number" value="0" min="0" step="1" required></label>
+        <label>Energy loss weight<input id="weight-energy" type="number" value="1" min="0" step="any" required></label>
+        <label>Force loss weight<input id="weight-forces" type="number" value="1" min="0" step="any" required></label>
+        <label>Save interval N (epochs)<input id="save-interval" type="number" value="10" min="0" step="1" required><small>0 disables periodic checkpoints.</small></label>
+        <label>Maximum retained checkpoints<input id="max-checkpoints" type="number" value="3" min="1" step="1" required><small>Keeps the newest files; excludes the final model.pt.</small></label>
+        <label>Test interval M (epochs)<input id="test-interval" type="number" value="1" min="1" step="1" required><small>With test data, evaluates every M epochs.</small></label>
+      </div><p id="training-hint" class="hint">Set energy or force weights to 0 to disable them. Enable charges with the checkbox. Gradients accumulate across structures in each batch.</p></div>
+      </div><div class="form-side"><div class="panel summary"><div class="eyebrow">READY WHEN YOU ARE</div><h2>Start an experiment</h2><p>Data settings, parameters and logs are saved in a separate job directory.</p><ul><li>Train models or evaluate existing checkpoints</li><li>Live progress, metrics and logs</li><li>Separate outputs for each job</li></ul><button class="primary" id="start" type="submit">Start training <span>→</span></button><small>Jobs run in the background queue as GPUs become available. Closing the browser does not stop the queue.</small></div></div></div>
     </form>
   </section>
   <section id="detail-view" hidden>
-    <div class="page-title"><div><a href="#jobs" class="back">← 全部任务</a><h1 id="detail-name"></h1><p id="detail-meta"></p></div><button id="stop" class="danger">停止训练</button></div>
+    <div class="page-title"><div><a href="#jobs" class="back">← All jobs</a><h1 id="detail-name"></h1><p id="detail-meta"></p></div><button id="stop" class="danger">Stop training</button></div>
     <div class="panel progress-panel"><div><span id="detail-status" class="badge"></span><span id="progress-label"></span></div><progress id="progress" value="0" max="100"></progress><p id="early-stopping-result" class="hint" hidden></p><p id="detail-error" role="alert" hidden></p></div>
-    <div id="evaluation-panel" class="panel" hidden><div class="panel-heading"><h2>评估结果</h2><a id="download-evaluation" target="_blank" rel="noopener">查看结果 JSON ↗</a></div><div id="evaluation-metrics" class="output"></div><div id="evaluation-plots" class="evaluation-plots"></div><p class="footnote">能量按结构统计；力按全部原子的笛卡尔分量统计；电荷按原子统计。单位沿用数据换算设置，不拟合能量偏移。</p></div>
-    <div class="panel chart-panel"><div class="panel-heading"><h2>训练损失</h2><select id="metric" aria-label="损失类型"><option value="energy">Energy MSE</option><option value="forces">Forces MSE</option><option value="charges">Charges MSE</option></select></div><div id="chart"></div><div class="legend"><span><i class="line purple"></i>训练集</span><span><i class="line green"></i>验证集</span><span><i class="line" style="background:#f4bb75"></i>测试集</span><span class="muted">按实际评估 epoch 显示 · 线性坐标</span></div><p id="test-result" class="footnote" style="padding:0 23px 18px"></p></div>
-    <div class="panel"><div class="panel-heading"><h2>输出文件</h2><a id="download-model" class="button" hidden>下载模型 ↓</a></div><div class="output"><span class="muted">任务目录</span><code id="output-path"></code><a id="download-best" class="button" hidden>下载最佳模型 best.pt ↓</a><a id="download-config" target="_blank" rel="noopener">查看配置 ↗</a></div></div>
-    <div class="panel"><div class="panel-heading"><h2>定期保存的 Checkpoints</h2><span class="muted">最新在前</span></div><div id="checkpoint-list" class="output"></div></div>
-    <div class="panel"><div class="panel-heading"><h2>运行日志</h2><span class="muted">最近 32 KB</span></div><pre id="log">等待训练进程输出…</pre></div>
+    <div id="prediction-panel" class="panel" hidden><div class="panel-heading"><h2>Prediction results</h2></div><div id="prediction-results" class="output"></div></div>
+    <div id="evaluation-panel" class="panel" hidden><div class="panel-heading"><h2>Evaluation results</h2><a id="download-evaluation" target="_blank" rel="noopener">View results JSON ↗</a></div><div id="evaluation-metrics" class="output"></div><div id="evaluation-plots" class="evaluation-plots"></div><p class="footnote">Energy metrics are per structure; force metrics cover Cartesian components; charge metrics are per atom. Uses configured units without fitting an energy offset.</p></div>
+    <div class="panel chart-panel"><div class="panel-heading"><h2>Training loss</h2><select id="metric" aria-label="Loss type"><option value="energy">Energy MSE</option><option value="forces">Forces MSE</option><option value="charges">Charges MSE</option></select></div><div id="chart"></div><div class="legend"><span><i class="line purple"></i>Training set</span><span><i class="line green"></i>Validation set</span><span><i class="line" style="background:#f4bb75"></i>Test set</span><span class="muted">Actual evaluation epochs; linear scale</span></div><p id="test-result" class="footnote" style="padding:0 23px 18px"></p></div>
+    <div class="panel"><div class="panel-heading"><h2>Output files</h2><a id="download-model" class="button" hidden>Download model ↓</a></div><div class="output"><span class="muted">Job directory</span><code id="output-path"></code><a id="download-best" class="button" hidden>Download best model best.pt ↓</a><a id="download-config" target="_blank" rel="noopener">View configuration ↗</a></div></div>
+    <div class="panel"><div class="panel-heading"><h2>Periodic checkpoints</h2><span class="muted">Newest first</span></div><div id="checkpoint-list" class="output"></div></div>
+    <div class="panel"><div class="panel-heading"><h2>Run log</h2><span class="muted">Latest 32 KB</span></div><pre id="log">Waiting for worker output...</pre></div>
   </section>
 </main>
 </body></html>

@@ -152,10 +152,10 @@ def test_dataset_http_lifecycle(tmp_path):
 def test_tags_validation_persistence_and_split_inheritance(tmp_path):
     manager = DatasetManager(tmp_path / 'catalog')
     record = manager.create('tagged', dict(directory=str(source_data(tmp_path / 'source'))),
-                            tags=[' DFT ', 'dft', '反应'])
-    assert record['tags'] == ['DFT', '反应']
+                            tags=[' DFT ', 'dft', 'reaction'])
+    assert record['tags'] == ['DFT', 'reaction']
     children = manager.split(record['id'], dict(name='split'))['datasets']
-    assert all(child['tags'] == ['DFT', '反应'] for child in children)
+    assert all(child['tags'] == ['DFT', 'reaction'] for child in children)
     manager.update(record['id'], dict(tags=['v2']))
     assert DatasetManager(manager.root).get(record['id'])['tags'] == ['v2']
     for tags in ['bad', [''], ['x' * 41], [3], ['x'] * 21]:
@@ -169,7 +169,7 @@ def test_delete_existing_record_keeps_original_files(tmp_path):
     manager = DatasetManager(tmp_path / 'catalog')
     path = source_data(tmp_path / 'source')
     record = manager.create('source', dict(directory=str(path)))
-    with pytest.raises(ValueError, match='源文件'):
+    with pytest.raises(ValueError, match='source file'):
         manager.delete(record['id'], dict(delete_files=True))
     manager.delete(record['id'], {})
     assert not manager.list()
@@ -184,13 +184,13 @@ def test_delete_managed_files_reference_guards_and_siblings(tmp_path):
     child = children[0]
     from pathlib import Path
     path = Path(child['spec']['directory'])
-    with pytest.raises(ValueError, match='任务引用'):
+    with pytest.raises(ValueError, match='referenced by jobs'):
         manager.delete(child['id'], dict(delete_files=True), job_specs=[child['spec']])
     # Explicit file mappings outside the referencing directory also count.
-    with pytest.raises(ValueError, match='任务引用'):
+    with pytest.raises(ValueError, match='referenced by jobs'):
         manager.delete(child['id'], dict(delete_files=True), job_specs=[dict(directory=str(tmp_path / 'elsewhere'), files={'pos': str(path / 'pos.npy')})])
     alias = manager.create('alias', child['spec'])
-    with pytest.raises(ValueError, match='其他数据集'):
+    with pytest.raises(ValueError, match='other datasets'):
         manager.delete(child['id'], dict(delete_files=True))
     manager.delete(alias['id'], {})
     manager.delete(child['id'], dict(delete_files=True))
