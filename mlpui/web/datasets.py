@@ -18,7 +18,7 @@ def checked_spec(spec):
     spec = copy.deepcopy(spec)
     if not isinstance(spec, dict) or not spec.get("directory"):
         raise ValueError("Enter a data directory")
-    if spec.keys() - {"directory", "files", "shards", "gradients", "energy_scale", "length_scale"}:
+    if spec.keys() - {"directory", "files", "shards", "gradients", "energy_scale", "length_scale", "baseline_metadata"}:
         raise ValueError("Unsupported dataset fields")
     spec["directory"] = str(Path(spec["directory"]).expanduser().resolve())
     if "files" in spec and (not isinstance(spec["files"], dict) or
@@ -35,8 +35,8 @@ def checked_spec(spec):
 def inspect_spec(spec):
     data = dataset(spec)
     parts = data.datasets if isinstance(data, NpyShards) else [data]
-    fields = set(parts[0].arrays) - {"offsets"}
-    if any(set(part.arrays) - {"offsets"} != fields for part in parts):
+    fields = set(parts[0].arrays) - {"offsets", "mm_offsets"}
+    if any(set(part.arrays) - {"offsets", "mm_offsets"} != fields for part in parts):
         raise ValueError("All groups must contain the same fields")
     fields = set().union(*(part.arrays.keys() for part in parts))
     files = []
@@ -46,47 +46,87 @@ def inspect_spec(spec):
             files.append(dict(field=key, group=spec.get("shards", [""])[i],
                               filename=path.name, shape=list(array.shape), dtype=str(array.dtype),
                               bytes=path.stat().st_size))
-    return data, dict(samples=len(data), groups=len(parts), fields=sorted(fields), files=files)
+    metadata = parts[0].baseline_metadata
+    if any(part.baseline_metadata != metadata for part in parts):
+        raise ValueError("All groups must use identical baseline provenance")
+    if metadata is not None:
+        from mlpui.backends import get_backend
+        get_backend("tensornet_qmmm").configure_targets({"baseline": metadata}, ())
+    from mlpui.evaluation_artifacts import _validated_sidecars
+    _validated_sidecars(data)
+    return data, dict(samples=len(data), groups=len(parts), fields=sorted(fields), files=files,
+                      baseline_metadata=metadata)
 
 
 def export_subset(data, indices, directory):
-    """Write converted samples as numeric ragged NPY arrays with bounded RAM."""
+    """Export selected frames with independent QM/MM offsets and baseline provenance."""
+    from mlpui.evaluation_artifacts import _validated_sidecars, _load_sidecar
+    indices = np.asarray(indices, dtype=np.int64)
+    if indices.ndim != 1 or not len(indices) or np.any(indices < 0) or np.any(indices >= len(data)):
+        raise ValueError("Subset requires valid nonempty frame indices")
+    parts = data.datasets if isinstance(data, NpyShards) else [data]
+    metadata = parts[0].baseline_metadata
+    if any(p.baseline_metadata != metadata for p in parts):
+        raise ValueError("Cannot combine different baseline identities")
+    frame_index, _, masks = _validated_sidecars(data)
+    qm = {"z", "pos", "forces", "charges", "baseline_forces"}
+    mm = {"mm_pos", "mm_charges", "mm_forces", "mm_potential", "baseline_mm_forces", "baseline_mm_potential"}
+    counts = {"qm": [], "mm": []}
+    for i in indices:
+        sample = data[int(i)]
+        counts["qm"].append(len(sample["z"]))
+        counts["mm"].append(len(sample.get("mm_pos", [])))
+    offsets = {k: np.concatenate(([0], np.cumsum(v, dtype=np.int64))) for k, v in counts.items()}
+    first = data[int(indices[0])]
+    keys = set(first) - {"baseline_metadata"}
     directory = Path(directory)
     directory.mkdir()
-    parts = data.datasets if isinstance(data, NpyShards) else [data]
-    all_sizes = np.concatenate([np.diff(part.arrays["offsets"]) if part.ragged
-                                else np.full(len(part), part.arrays["pos"].shape[1], dtype=np.int64)
-                                for part in parts])
-    sizes = all_sizes[indices]
-    offsets = np.concatenate(([0], np.cumsum(sizes)))
-    np.save(directory / "offsets.npy", offsets)
-    first = data[int(indices[0])]
-    atomic = {"z", "pos", "forces", "charges"}
-    # Memory-map each output and copy a single structure at a time.
     outputs = {}
     try:
-        for key, initial in first.items():
-            initial = np.asarray(initial)
+        for key in keys:
+            initial = np.asarray(first[key])
             if key == "charges":
                 initial = initial.reshape(-1)
-            if key in ("energy", "charge", "spin"):
+            if key in ("energy", "baseline_energy", "charge", "spin"):
                 initial = initial.reshape(())
-            shape = ((int(offsets[-1]),) + initial.shape[1:] if key in atomic
-                     else (len(indices),) + initial.shape)
-            dtype = np.result_type(initial.dtype, *(part.arrays[key].dtype for part in parts))
+            region = "qm" if key in qm else "mm" if key in mm else None
+            shape = ((int(offsets[region][-1]),) + initial.shape[1:] if region else (len(indices),) + initial.shape)
+            dtype = np.result_type(initial.dtype, *(p.arrays[key].dtype for p in parts))
             outputs[key] = np.lib.format.open_memmap(directory / f"{key}.npy", mode="w+", dtype=dtype, shape=shape)
         for row, index in enumerate(indices):
             for key, value in data[int(index)].items():
+                if key == "baseline_metadata":
+                    continue
                 if key == "charges":
                     value = value.reshape(-1)
-                if key in ("energy", "charge", "spin"):
+                if key in ("energy", "baseline_energy", "charge", "spin"):
                     value = value.reshape(())
-                outputs[key][slice(offsets[row], offsets[row + 1]) if key in atomic else row] = value
+                region = "qm" if key in qm else "mm" if key in mm else None
+                location = slice(offsets[region][row], offsets[region][row+1]) if region else row
+                outputs[key][location] = value
         for output in outputs.values():
             output.flush()
     finally:
         outputs.clear()
-    return {"directory": str(directory), "files": {k: f"{k}.npy" for k in (*first, "offsets")},
+    np.save(directory / "offsets.npy", offsets["qm"])
+    keys.add("offsets")
+    if "mm_pos" in keys:
+        np.save(directory / "mm_offsets.npy", offsets["mm"])
+        keys.add("mm_offsets")
+    if "frame_index" not in keys:
+        np.save(directory / "frame_index.npy", frame_index[indices])
+        keys.add("frame_index")
+    for name in ("source_index", "short_contact"):
+        if name not in keys:
+            value = _load_sidecar(data, name)
+            if value is not None:
+                np.save(directory / f"{name}.npy", value[indices])
+                keys.add(name)
+    for name, value in masks.items():
+        np.save(directory / f"{name}.npy", value[indices])
+    if metadata is not None:
+        write_json(directory / "baseline_metadata.json", metadata)
+    return {"directory": str(directory), "files": {k: f"{k}.npy" for k in sorted(keys)},
             "gradients": False, "energy_scale": 1., "length_scale": 1.}
 
 
@@ -154,8 +194,10 @@ class DatasetManager:
     def upload(self, identifier, filename, stream, size):
         # Never interpret client filenames as paths, including Windows path syntax.
         if (not isinstance(filename, str) or len(filename) > 200 or
-                not re.fullmatch(r"[\w .-]+\.npy", filename) or filename.startswith(".")):
+                not (re.fullmatch(r"[\w .-]+\.npy", filename) or filename == "baseline_metadata.json") or filename.startswith(".")):
             raise ValueError("Use a plain .npy filename without directory paths")
+        if filename == "baseline_metadata.json" and size > 65536:
+            raise ValueError("Baseline metadata must be at most 64 KiB")
         if not 0 < size <= 20 * 1024**3:
             raise ValueError("Each upload must be between 1 byte and 20 GiB")
         with self.lock:
@@ -177,14 +219,21 @@ class DatasetManager:
                         output.write(chunk)
                         remaining -= len(chunk)
                 try:
-                    value = np.load(temporary, allow_pickle=False, mmap_mode="r")
+                    if filename == "baseline_metadata.json":
+                        import json
+                        metadata = json.loads(temporary.read_text(encoding="utf-8"))
+                        from mlpui.backends import get_backend
+                        get_backend("tensornet_qmmm").configure_targets({"baseline": metadata}, ())
+                        value = np.array(0)  # continue through the shared numeric-file check
+                    else:
+                        value = np.load(temporary, allow_pickle=False, mmap_mode="r")
                     if not isinstance(value, np.ndarray) or value.dtype.kind not in "biuf":
                         if hasattr(value, "close"):
                             value.close()
                         raise ValueError("Only real numeric NPY arrays without pickle are accepted")
                     del value
                 except Exception as exc:
-                    raise ValueError("Invalid numeric NPY file") from exc
+                    raise ValueError("Invalid baseline_metadata.json: " + str(exc) if filename == "baseline_metadata.json" else "Invalid numeric NPY file") from exc
                 temporary.rename(destination)
             finally:
                 temporary.unlink(missing_ok=True)

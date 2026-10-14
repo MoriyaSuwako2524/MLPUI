@@ -49,8 +49,10 @@ def test_split_reproducible_complete_aligned_and_units(tmp_path, ragged):
         data = dataset(child['spec'])
         data_again = dataset(again['spec'])
         for row, index in enumerate(selected):
-            assert set(data[row]) == set(source[int(index)])
-            for key, value in data[row].items():
+            assert set(data[row]) == set(source[int(index)]) | {"frame_index"}
+            assert data[row]["frame_index"] == index
+            for key, value in source[int(index)].items():
+                value = data[row][key]
                 np.testing.assert_allclose(value.reshape(-1), source[int(index)][key].reshape(-1))
                 np.testing.assert_array_equal(value, data_again[row][key])
     assert sorted(indices) == list(range(10))

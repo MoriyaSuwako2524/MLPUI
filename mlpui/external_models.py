@@ -106,6 +106,7 @@ def load_external_checkpoint(path, *, family=None, model_config=None, device=Non
     if family is None:
         return None
     backend = get_backend(family)
+    backend.validate_checkpoint_config(saved_config, config)
     saved_settings = backend.settings(saved_config)
     settings = backend.settings(config)
     constrained = saved_settings.get("charge_constraint", False) or getattr(state, "charge_constraint", False)

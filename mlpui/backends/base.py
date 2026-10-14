@@ -13,6 +13,8 @@ OUTPUT_ALIASES = {
     "dipole": ("dipole", "vec"),
     "charges": ("charges", "charge"),
     "stress": ("stress",),
+    "mm_forces": ("mm_forces",),
+    "mm_potential": ("mm_potential",),
 }
 
 
@@ -37,6 +39,8 @@ class ModelBackend(ABC):
     aliases = ()
     config_container = None
     config_version = 1
+    web_supported = True
+    supports_evaluation_artifacts = True
     training_targets = ("energy", "forces", "charges")
 
     def metadata(self):
@@ -83,6 +87,20 @@ class ModelBackend(ABC):
     def validate_constraint(self, model):
         if "charges" not in self.available_properties(model):
             raise ValueError("Total-charge constraint requires a charge output head")
+
+    def validate_checkpoint_config(self, saved_config, requested_config):
+        """Optional backend guard against changing physical semantics on load."""
+        return None
+
+    def prepare_sample(self, sample, device, dtype, *, model=None):
+        """Backward-compatible structured input path; specialized backends retain extra fields."""
+        from mlpui.data import NpyDataset
+        if "mm_pos" in sample or "baseline_metadata" in sample:
+            raise ValueError("This backend does not accept a dual-region/offline-baseline sample")
+        return self.prepare_inputs(NpyDataset.atoms(sample), device, dtype, model=model,
+            charge=float(np.asarray(sample["charge"]).item()) if "charge" in sample else None,
+            spin=float(sample.get("spin", 0)),
+            require_charge=getattr(model, "charge_constraint", False))
 
     def geometry(self, atoms, device, dtype, length_to_angstrom, charge, require_charge):
         if require_charge and charge is None:

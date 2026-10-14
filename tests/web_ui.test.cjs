@@ -10,7 +10,7 @@ function dashboard() {
     if (!elements.has(id)) elements.set(id, {
       value: id === 'metric' ? 'energy' : '', innerHTML: '', textContent: '',
       panel: {}, closest() { return this.panel; },
-      addEventListener() {}, removeAttribute(name) { delete this[name]; },
+      listeners: {}, addEventListener(name, fn) { this.listeners[name] = fn; }, querySelectorAll() { return []; }, removeAttribute(name) { delete this[name]; },
     });
     return elements.get(id);
   }};
@@ -72,3 +72,53 @@ for (const type of ['training', 'evaluation', 'prediction']) {
     }
   });
 }
+
+test('QMMM form preserves target selection, mapping and offline identity', () => {
+  const ui=dashboard();
+  ui.context.structuredClone=structuredClone;
+  ui.context.document.querySelectorAll=()=>[];
+  vm.runInContext("let datasetRecords=[]; backends={tensornet_qmmm:{training_targets:['energy','forces','mm_forces','mm_potential']}};",ui.context);
+  const values={'family':'tensornet_qmmm','task-type':'evaluation','model-config':'{}',
+    'qmmm-baseline-mode':'offline','qmmm-baseline-metadata':JSON.stringify({mode:'offline',source_manifest_sha256:'c'.repeat(64)}),
+    'checkpoint':'downloaded.pt','energy-scale':'1','length-scale':'1','dtype':'float64','device':'cpu'};
+  for(const [key,value] of Object.entries(values))ui.element(key).value=value;
+  for(const key of ['z','pos','mm_pos','mm_charges','mm_offsets','mm_forces','baseline_energy','baseline_mm_forces'])ui.element('file-'+key).value=key+'.npy';
+  ui.element('eval-mm_forces').checked=true;
+  vm.runInContext('updateBackendTargets(); result=payload();',ui.context);
+  assert.equal(ui.element('qmmm-settings').hidden,false);
+  assert.equal(ui.element('qmmm-baseline-label').hidden,false);
+  assert.equal(ui.element('weight-mm_forces').disabled,true);
+  assert.equal(ui.element('eval-charges').disabled,true);
+  const result=JSON.parse(JSON.stringify(ui.context.result));
+  assert.deepEqual(result.training.loss_weights,{mm_forces:1});
+  assert.equal(result.evaluation.files.mm_offsets,'mm_offsets.npy');
+  assert.equal(result.model_config.baseline.mode,'offline');
+  ui.element('file-mm_forces').value='';
+  assert.throws(()=>vm.runInContext('payload()',ui.context),/missing mm_forces labels/);
+});
+
+test('zero-MM evaluation displays empty metrics, units and downloads',()=>{
+  const ui=dashboard();
+  ui.render(job({family:'tensornet_qmmm',task_type:'evaluation',evaluation:{metrics:{mm_forces:{count:0,mae:null,mse:null,rmse:null}},plots:{},artifacts:{manifest:'metadata.json',files:{'mm_counts.npy':{}},properties:{mm_forces:{unit:'eV/angstrom'}}}}}));
+  assert.match(ui.element('evaluation-metrics').innerHTML,/N\/A \(no components\)/);
+  assert.match(ui.element('evaluation-metrics').innerHTML,/eV\/angstrom/);
+  assert.match(ui.element('evaluation-metrics').innerHTML,/<td>0<\/td>/);
+  assert.match(ui.element('evaluation-artifacts').innerHTML,/mm_counts.npy/);
+});
+
+
+test('switching to QMMM after selecting a managed dataset restores offline identity',()=>{
+  const ui=dashboard();
+  ui.context.document.querySelectorAll=()=>[];
+  vm.runInContext('init=()=>{};',ui.context);
+  vm.runInContext(fs.readFileSync(path.join(__dirname,'../mlpui/web/static/datasets.js'),'utf8'),ui.context);
+  vm.runInContext("models={tensornet_qmmm:{baseline:{mode:'residual_only'}}}; backends={tensornet_qmmm:{training_targets:['energy','forces','mm_forces','mm_potential']}}; datasetRecords=[{id:'selected',spec:{directory:'data'},summary:{fields:['z','pos','mm_pos','mm_charges'],baseline_metadata:{mode:'offline',source_manifest_sha256:'identity'}}}];",ui.context);
+  ui.element('family').value='tensornet_qmmm';
+  ui.element('managed-train').value='selected';
+  ui.element('task-type').value='training';
+  ui.element('family').listeners.change();
+  assert.equal(ui.element('qmmm-baseline-mode').value,'offline');
+  assert.equal(JSON.parse(ui.element('qmmm-baseline-metadata').value).source_manifest_sha256,'identity');
+  assert.equal(ui.element('directory').value,'data');
+  assert.equal(ui.element('qmmm-baseline-label').hidden,false);
+});

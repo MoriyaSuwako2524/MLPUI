@@ -9,11 +9,11 @@ from mlpui.backends import get_backend, registered_backends
 
 def presets():
     from mlpui.web.prediction import DEFAULT_CONFIG
-    return {**{backend.name: backend.default_config() for backend in registered_backends()}, "uma": dict(DEFAULT_CONFIG)}
+    return {**{backend.name: backend.default_config() for backend in registered_backends() if backend.web_supported}, "uma": dict(DEFAULT_CONFIG)}
 
 
 def backend_metadata():
-    return {**{backend.name: backend.metadata() for backend in registered_backends()},
+    return {**{backend.name: backend.metadata() for backend in registered_backends() if backend.web_supported},
             "uma": {"label": "UMA (prediction only)", "training_targets": [],
                     "config_hint": "Native UMA-s-1p2: nonperiodic molecules, omol task, at least two atoms. Charge is total Q; spin is multiplicity (1 for an OMOL singlet). Optional charge/spin NPY files override these defaults. Input positions must convert to angstrom; outputs are eV and eV/angstrom."}}
 
@@ -34,6 +34,8 @@ def normalize(payload):
     if value.get("task_type") == "prediction":
         from mlpui.web.prediction import normalize_prediction
         return normalize_prediction(value)
+    if value.get("family") in {b.name for b in registered_backends() if not b.web_supported}:
+        raise ValueError("This backend does not support Web jobs")
     if value.get("family") == "uma":
         raise ValueError("Select UMA prediction to use UMA; training and evaluation are not supported")
     allowed = {"name", "family", "model_config", "training", "train", "validation", "test", "checkpoint", "task_type", "evaluation"}
@@ -70,7 +72,7 @@ def normalize(payload):
         if not isinstance(spec, dict) or not spec.get("directory"):
             raise ValueError("A dataset directory is required")
         if spec.keys() - {"directory", "shards", "files", "gradients", "energy_scale", "length_scale",
-                          "dataset_id", "dataset_name"}:
+                          "dataset_id", "dataset_name", "baseline_metadata"}:
             raise ValueError("Unsupported dataset fields")
         if "dataset_id" in spec and (not isinstance(spec["dataset_id"], str)
                                       or not re.fullmatch(r"[a-f0-9]{32}", spec["dataset_id"])):
@@ -132,6 +134,29 @@ def inspect_data(settings):
         if missing:
             raise ValueError(f"{key} missing labels: {', '.join(sorted(missing))}")
         parts = data.datasets if isinstance(data, NpyShards) else [data]
+        if settings["family"] == "tensornet_qmmm":
+            from types import SimpleNamespace
+            import torch
+            backend = get_backend(settings["family"])
+            config = backend.configure_targets(model_config, labels)
+            required = {"mm_pos", "mm_charges"}
+            if config["baseline"]["mode"] == "offline":
+                required |= {"baseline_" + target for target in labels | {"energy"}}
+            for part in parts:
+                absent = required - part.arrays.keys()
+                if absent:
+                    raise ValueError(f"{key} missing QMMM inputs/baseline labels: {sorted(absent)}")
+                if config["baseline"]["mode"] == "offline" and part.baseline_metadata != config["baseline"]:
+                    raise ValueError(f"{key} baseline metadata does not match model configuration")
+            for sample in data:
+                backend.prepare_sample(sample, "cpu", torch.float64, model=SimpleNamespace(config=config))
+            from mlpui.evaluation_artifacts import _validated_sidecars
+            _validated_sidecars(data)
+            if settings.get("checkpoint"):
+                from mlpui.external_models import load_external_checkpoint
+                load_external_checkpoint(settings["checkpoint"], family="tensornet_qmmm",
+                                         model_config=config, device="cpu")
         result[key] = {"samples": len(data), "groups": len(parts),
-                       "fields": sorted(fields), "first_atoms": len(data[0]["z"])}
+                       "fields": sorted(fields), "first_atoms": len(data[0]["z"]),
+                       "first_mm_points": len(data[0].get("mm_pos", []))}
     return result

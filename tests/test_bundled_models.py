@@ -37,14 +37,19 @@ for family, config in presets().items():
         continue  # UMA is an optional inference runtime, not a bundled trainer.
     if family == 'newtonnet':
         config.update(n_features=8, n_basis=4, n_interactions=1)
-    elif family == 'torchmdnet':
+    elif family in ('torchmdnet', 'tensornet_qmmm'):
         config.update(embedding_dimension=8, num_rbf=4, num_layers=1)
     else:
         config.update(num_channels=4, max_ell=1, max_L=1, correlation=2, radial_MLP=[8])
     trainer = Trainer(family, config, TrainingConfig(epochs=1))
     assert type(trainer.model).__module__.startswith('mlpui.models.' + family)
+    if family == 'tensornet_qmmm':
+        np.save(folder / 'mm_pos.npy', np.zeros((1, 0, 3)))
+        np.save(folder / 'mm_charges.npy', np.zeros((1, 0)))
     trainer.fit(folder, output_dir=folder / family)
     assert trainer.evaluate(folder)['samples'] == 1
+    if family == 'tensornet_qmmm':
+        continue  # Structured input only; ASE/MD is explicitly unsupported.
     atoms = NpyDataset.atoms(NpyDataset(folder)[0])
     atoms.calc = CalculatorBuilder.from_checkpoint(folder / family / 'model.pt', device='cpu').build()
     assert np.isfinite(atoms.get_forces()).all()

@@ -22,6 +22,12 @@ function setManagedFields(){
     $('directory').value=spec.directory; $('layout').value='custom'; $('shards').value=(spec.shards||[]).join(', ');
     $('gradients').checked=!!spec.gradients;
     $('energy-scale').value=spec.energy_scale??1; $('length-scale').value=spec.length_scale??1;
+    if(text('family')==='tensornet_qmmm') {
+      const baseline=selected.summary.baseline_metadata;
+      $('qmmm-baseline-mode').value=baseline?'offline':'residual_only';
+      $('qmmm-baseline-metadata').value=baseline?JSON.stringify(baseline,null,2):'';
+      updateBackendTargets();
+    }
     for(const input of $('file-details').querySelectorAll('input[id^="file-"]')){
       const key=input.id.slice(5);input.value=spec.files?.[key]||(selected.summary.fields.includes(key)?key+'.npy':'');
     }
@@ -81,6 +87,10 @@ function datasetSpec(){
   const spec={directory:text('dataset-directory'),gradients:$('dataset-gradients').checked,
     energy_scale:number('dataset-energy-scale'),length_scale:number('dataset-length-scale')};
   if(Object.keys(mapping).length)spec.files=mapping;
+  if(text('dataset-baseline-metadata')) {
+    try {spec.baseline_metadata=JSON.parse(text('dataset-baseline-metadata'));}
+    catch {throw new Error('Baseline metadata is not valid JSON');}
+  }
   if(groups('dataset-shards').length)spec.shards=groups('dataset-shards');
   return spec;
 }
@@ -100,6 +110,10 @@ $('dataset-source').addEventListener('change',()=>{
   $('dataset-upload-label').hidden=!uploading; uploadDraft=null;
 });
 $('dataset-layout').addEventListener('change',()=>{
+  if(text('dataset-layout')==='qmmm') {
+    $('dataset-mapping').value=JSON.stringify({z:'z.npy',pos:'pos.npy',mm_pos:'mm_pos.npy',mm_charges:'mm_charges.npy',mm_offsets:'mm_offsets.npy',energy:'energy.npy',forces:'forces.npy'},null,2);
+    $('dataset-shards').value=''; $('dataset-gradients').checked=false; $('dataset-mapping-details').open=true; return;
+  }
   const qm=text('dataset-layout')==='qm';
   if(text('dataset-layout')==='custom'){$('dataset-mapping-details').open=true;return;}
   $('dataset-mapping').value=qm?JSON.stringify({z:'full_qm_type.npy',pos:'qm_coord_{shard}.npy',energy:'energy_{shard}.npy',forces:'qm_grad_{shard}.npy'},null,2):'{}';
@@ -111,7 +125,7 @@ $('dataset-form').addEventListener('submit',event=>{
     if(text('dataset-source')==='upload'){
       const files=[...$('dataset-files').files];
       if(!files.length)throw new Error('Select NPY files');
-      if(files.some(f=>!f.name.endsWith('.npy')))throw new Error('Only .npy files are supported');
+      if(files.some(f=>!f.name.endsWith('.npy')&&f.name!=='baseline_metadata.json'))throw new Error('Upload NPY arrays and optionally baseline_metadata.json');
       // Retain the draft after a failed validation so mapping can be corrected.
       const signature=JSON.stringify(files.map(f=>[f.name,f.size,f.lastModified]));
       if(!uploadDraft||uploadDraft.signature!==signature){

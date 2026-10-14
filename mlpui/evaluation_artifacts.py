@@ -13,7 +13,8 @@ import numpy as np
 from mlpui.data import NpyDataset, NpyShards
 
 
-ATOMIC_PROPERTIES = {"forces", "charges"}
+ATOMIC_PROPERTIES = {"forces", "charges", "mm_forces", "mm_potential"}
+MM_PROPERTIES = {"mm_forces", "mm_potential"}
 SPLIT_MASKS = ("is_train", "is_validation", "is_test", "is_guard")
 
 
@@ -58,6 +59,8 @@ def _source_rows(data):
 def _load_sidecar(data, name):
     """Load a global sidecar whose rows match the exact evaluation order."""
     parts = _parts(data)
+    if all(name in part.arrays for part in parts):
+        return np.concatenate([np.asarray(part.arrays[name]) for part in parts])
     directories = {part.directory.resolve() for part in parts}
     if len(directories) != 1:
         return None
@@ -149,13 +152,20 @@ def save_evaluation_artifacts(observations, data, directory, *, metadata=None):
         # friendlier [samples, atoms, ...] artifact shape whenever every
         # evaluated structure has the same atom count, including ragged input.
         variable_atoms = bool(len(np.unique(atom_counts)) > 1)
+        has_mm = "mm_pos" in _parts(data)[0].arrays
+        mm_counts = np.asarray([len(data[i].get("mm_pos", [])) for i in range(len(data))], dtype=np.int64)
+        variable_mm = bool(len(np.unique(mm_counts)) > 1)
+        qmmm = (metadata or {}).get("model_family") == "tensornet_qmmm"
+        units = {"energy": "eV", "forces": "eV/angstrom", "mm_forces": "eV/angstrom", "mm_potential": "eV/e"}
         files, properties = {}, {}
         for prop, pairs in observations.items():
             if len(pairs) != len(data):
                 raise ValueError(f"{prop} observations do not cover every evaluated sample")
             references, predictions = zip(*pairs)
-            reference, ref_layout = _combine(references, prop, atom_counts, variable_atoms)
-            prediction, pred_layout = _combine(predictions, prop, atom_counts, variable_atoms)
+            counts = mm_counts if prop in MM_PROPERTIES else atom_counts
+            variable = variable_mm if prop in MM_PROPERTIES else variable_atoms
+            reference, ref_layout = _combine(references, prop, counts, variable)
+            prediction, pred_layout = _combine(predictions, prop, counts, variable)
             if reference.shape != prediction.shape or ref_layout != pred_layout:
                 raise ValueError(f"Reference and prediction artifact shapes differ for {prop}")
             ref_name, pred_name = f"{prop}_ref.npy", f"{prop}_pred.npy"
@@ -166,7 +176,9 @@ def save_evaluation_artifacts(observations, data, directory, *, metadata=None):
             files[pred_name] = {"role": "model_prediction", "shape": list(prediction.shape),
                                 "dtype": str(prediction.dtype)}
             properties[prop] = {"layout": ref_layout, "reference": ref_name, "prediction": pred_name,
-                                "unit": "e" if prop == "charges" else "converted_dataset_units"}
+                                "unit": units.get(prop, "converted_dataset_units") if qmmm else "e" if prop == "charges" else "converted_dataset_units",
+                                "region": "mm" if prop in MM_PROPERTIES else "qm" if prop in ATOMIC_PROPERTIES else "structure",
+                                "offsets": "mm_structure_offsets.npy" if prop in MM_PROPERTIES and variable_mm else "structure_offsets.npy" if prop in ATOMIC_PROPERTIES and variable_atoms and prop not in MM_PROPERTIES else None}
 
         source_group, source_row = _source_rows(data)
         frame_index, frame_origin, masks = _validated_sidecars(data)
@@ -176,6 +188,14 @@ def save_evaluation_artifacts(observations, data, directory, *, metadata=None):
         ordered.update({f"{name}.npy": value for name, value in masks.items()})
         if variable_atoms:
             ordered["structure_offsets.npy"] = np.concatenate(([0], np.cumsum(atom_counts)))
+        if has_mm:
+            ordered["qm_counts.npy"] = atom_counts
+            ordered["mm_counts.npy"] = mm_counts
+            ordered["mm_structure_offsets.npy"] = np.concatenate(([0], np.cumsum(mm_counts)))
+        for name in ("source_index", "short_contact"):
+            value = _load_sidecar(data, name)
+            if value is not None:
+                ordered[f"{name}.npy"] = value
         for name, value in ordered.items():
             _write_npy(staging / name, value)
             files[name] = {"role": name.removesuffix(".npy"), "shape": list(value.shape),
@@ -191,6 +211,10 @@ def save_evaluation_artifacts(observations, data, directory, *, metadata=None):
             "files": files,
             "reference_semantics": "Reference arrays are labels supplied by the evaluation dataset; prediction arrays are model outputs.",
         }
+        if has_mm:
+            manifest["mm_layout"] = "flat_with_mm_structure_offsets" if variable_mm else "dense"
+            manifest["baseline"] = _parts(data)[0].baseline_metadata
+            manifest["derivative_contract"] = "offline_component_values_not_total_energy_autograd" if _parts(data)[0].baseline_metadata else "residual_energy_autograd"
         manifest["provenance"] = {"dataset": _dataset_identity(data), **(metadata or {})}
         manifest_path = staging / "metadata.json"
         manifest_path.write_text(json.dumps(manifest, ensure_ascii=False, allow_nan=False, indent=2),

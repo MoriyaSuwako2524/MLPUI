@@ -5,6 +5,11 @@ ASE adapters and WebUI. It registers NewtonNet, TorchMD-Net (which includes
 TensorNet) and MACE. Model implementations remain under `mlpui.models`; this interface does
 not change their parameters, equations or native state-dict keys.
 
+The separate [TensorNet-QMMM prototype](tensornet-qmmm.md) adds fixed-environment
+dual-region training through Python/CLI and Web, including split and evaluation
+artifact exports. ASE/MD remains unsupported; the Web catalog filters
+`web_supported=False` backends.
+
 ## Responsibilities
 
 Each stateless `ModelBackend` owns:
@@ -34,8 +39,12 @@ Implement `ModelBackend` in a new module and register one instance in
 `mlpui/backends/__init__.py`. Names and aliases must be unique. Keep per-model
 state on the model, never on the registered adapter. `prepare_inputs` may return
 any native input object; `forward` handles that object's API and returns a dict
-with canonical property names. Training and ASE pass the active model to
-`prepare_inputs`, so graph construction can use its element table and cutoff.
+with canonical property names. Training calls `prepare_sample(sample, ..., model=...)`;
+the default implementation converts ordinary atomic samples via `prepare_inputs`.
+Specialized backends override this hook to retain structured environment inputs.
+ASE continues using `prepare_inputs`; both receive the active model. Backends may
+validate saved versus requested physics through `validate_checkpoint_config()`
+and opt out of unsupported exports with `supports_evaluation_artifacts=False`.
 Force training must preserve the differentiation
 graph. Evaluation may still require coordinate gradients even though parameters
 are not updated. A future graph backend can build its own neighbor data here.

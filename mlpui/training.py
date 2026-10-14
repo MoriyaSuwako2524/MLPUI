@@ -103,14 +103,14 @@ class Trainer:
         self.history = []
 
     def _errors(self, sample, on_prediction=None):
+        missing = set(self.config.loss_weights) - sample.keys()
+        if missing:
+            raise ValueError(f"Sample missing enabled labels: {sorted(missing)}")
         atoms = NpyDataset.atoms(sample)
         if "stress" in self.config.loss_weights and not np.all(atoms.pbc):
             raise ValueError("Stress training requires periodic structures")
-        inputs = self.backend.prepare_inputs(
-            atoms, self.config.device, self.config.dtype, model=self.model,
-            charge=float(np.asarray(sample["charge"]).item()) if "charge" in sample else None,
-            spin=float(sample.get("spin", 0)),
-            require_charge=getattr(self.model, "charge_constraint", False))
+        inputs = self.backend.prepare_sample(
+            sample, self.config.device, self.config.dtype, model=self.model)
         output = self.backend.forward(self.model, inputs, self.config.loss_weights)
         errors = {}
         for prop in self.config.loss_weights:
@@ -129,7 +129,8 @@ class Trainer:
         return errors
 
     def _loss(self, sample):
-        losses = {prop: error.square().mean() for prop, error in self._errors(sample).items()}
+        losses = {prop: (error.square().mean() if error.numel() else error.sum())
+                  for prop, error in self._errors(sample).items()}
         total = sum(self.config.loss_weights[k] * v for k, v in losses.items())
         if not torch.isfinite(total):
             raise ValueError("Non-finite training loss")
@@ -142,6 +143,8 @@ class Trainer:
         Energy is per structure; forces are pooled over all Cartesian components.
         Metrics use the dataset's converted units, with no energy-offset fitting.
         """
+        if (plot_dir is not None or artifact_dir is not None) and not getattr(getattr(self, "backend", None), "supports_evaluation_artifacts", True):
+            raise ValueError("QMMM plot/artifact export is not implemented; use numeric evaluate() metrics")
         data = data if isinstance(data, (NpyDataset, NpyShards)) else NpyDataset(data)
         self.model.eval()
         totals = {key: dict(count=0, absolute=0., squared=0.) for key in self.config.loss_weights}
@@ -166,6 +169,9 @@ class Trainer:
                 on_progress({"phase": "evaluation", "completed": index + 1, "total": len(data)})
         metrics = {}
         for key, total in totals.items():
+            if total["count"] == 0:
+                metrics[key] = dict(mae=None, mse=None, rmse=None, count=0)
+                continue
             mse = total["squared"] / total["count"]
             metrics[key] = dict(mae=total["absolute"] / total["count"],
                                 mse=mse, rmse=math.sqrt(mse), count=total["count"])
@@ -303,7 +309,7 @@ class Trainer:
             path.unlink()
 
     def save(self, path):
-        """Export portable weights/config for CalculatorBuilder (not optimizer resume)."""
+        """Export model weights/config, not external baseline data or optimizer resume."""
         path = Path(path)
         path.parent.mkdir(parents=True, exist_ok=True)
         temporary = path.with_name(path.name + "." + uuid4().hex + ".tmp")

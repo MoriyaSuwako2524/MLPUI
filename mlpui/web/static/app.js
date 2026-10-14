@@ -36,15 +36,16 @@ function payload() {
   const evaluating=text('task-type')!=='training';
   const selected=datasetRecords.find(d=>d.id===text('managed-train'));
   const weights={};
-  for(const key of ['energy','forces','charges']) {
+  for(const key of ['energy','forces','charges','mm_forces','mm_potential']) {
     if(!backends[text('family')]?.training_targets.includes(key)) continue;
     if(evaluating) {if($('eval-'+key).checked) weights[key]=1;}
     else if((key!=='charges'||$('train-charges').checked)&&number('weight-'+key)>0) weights[key]=number('weight-'+key);
   }
-  if(!Object.keys(weights).length) throw new Error('Select at least one target: energy, forces or charges');
+  if(!Object.keys(weights).length) throw new Error('Select at least one supported training or evaluation target');
   const files={};
-  for(const key of ['z','pos','energy','forces','charges','cell','pbc','offsets']) {
-    if(['energy','forces','charges'].includes(key) && !(key in weights)) continue;
+  for(const key of ['z','pos','energy','forces','charges','cell','pbc','offsets','mm_pos','mm_charges','mm_offsets','mm_forces','mm_potential','baseline_energy','baseline_forces','baseline_mm_forces','baseline_mm_potential','frame_index','source_index','short_contact']) {
+    if(['energy','forces','charges','mm_forces','mm_potential'].includes(key) && !(key in weights)) continue;
+    if(key.startsWith('mm_')||key.startsWith('baseline_')) {if(text('family')!=='tensornet_qmmm') continue;}
     if(text('file-'+key)) files[key]=text('file-'+key);
   }
   for(const key of Object.keys(weights)) if(selected?!selected.summary.fields.includes(key):!files[key]) throw new Error('Dataset is missing '+key+' labels');
@@ -54,6 +55,13 @@ function payload() {
   try { model=JSON.parse($('model-config').value); } catch { throw new Error('Model configuration is not valid JSON'); }
   const container=backends[text('family')]?.config_container;
   const modelSettings=container&&model[container]&&typeof model[container]==='object'?model[container]:model;
+  if(text('family')==='tensornet_qmmm') {
+    if(text('qmmm-baseline-mode')==='offline') {
+      try {modelSettings.baseline=JSON.parse(text('qmmm-baseline-metadata'));} catch {throw new Error('Enter valid offline baseline identity JSON');}
+      if(modelSettings.baseline.mode!=='offline') throw new Error('Baseline metadata must declare offline mode');
+    } else modelSettings.baseline={mode:'residual_only'};
+    if(!selected&&text('file-charge')) files.charge=text('file-charge');
+  }
   if($('charge-constraint').checked) {
     if(!('charges' in weights)) throw new Error('Also enable atomic-charge training or evaluation');
     modelSettings.charge_constraint=true;
@@ -172,7 +180,7 @@ function renderDetail(job) {
   const artifacts=job.evaluation?.artifacts;
   const artifactFiles=artifacts?Object.keys(artifacts.files||{}):[];
   $('evaluation-artifacts').innerHTML=artifactFiles.length?'<strong>Prediction and reference arrays</strong>'+artifactFiles.map(name=>`<a href="/api/jobs/${job.id}/artifacts/${encodeURIComponent(name)}" download="${escapeHTML(name)}">${escapeHTML(name)} &#8595;</a>`).join('')+`<a href="/api/jobs/${job.id}/artifacts/${encodeURIComponent(artifacts.manifest)}" download="metadata.json">metadata.json &#8595;</a>`:(job.evaluation?'<span class="muted">No exported arrays</span>':'');
-  $('evaluation-metrics').innerHTML=job.evaluation?'<table><thead><tr><th>Metric</th><th>MAE</th><th>RMSE</th><th>MSE</th></tr></thead><tbody>'+Object.entries(job.evaluation.metrics).map(([key,m])=>`<tr><td>${escapeHTML(key)}</td><td>${m.mae.toExponential(5)}</td><td>${m.rmse.toExponential(5)}</td><td>${m.mse.toExponential(5)}</td></tr>`).join('')+'</tbody></table>':'No complete evaluation results yet';
+  $('evaluation-metrics').innerHTML=job.evaluation?'<table><thead><tr><th>Metric</th><th>Components</th><th>Unit</th><th>MAE</th><th>RMSE</th><th>MSE</th></tr></thead><tbody>'+Object.entries(job.evaluation.metrics).map(([key,m])=>`<tr><td>${escapeHTML(key)}</td><td>${m.count??"-"}</td><td>${escapeHTML(artifacts?.properties?.[key]?.unit||job.evaluation.units||"dataset units")}</td><td>${m.mae==null?'N/A (no components)':m.mae.toExponential(5)}</td><td>${m.rmse==null?'N/A':m.rmse.toExponential(5)}</td><td>${m.mse==null?'N/A':m.mse.toExponential(5)}</td></tr>`).join('')+'</tbody></table>':'No complete evaluation results yet';
   drawChart();
 }
 function drawChart() {
@@ -211,20 +219,41 @@ async function refresh() {
   } catch(error) { $('connection').textContent='Connection or job retrieval failed'; notify(error.message); }
   finally { pollBusy=false; }
 }
-$('family').addEventListener('change',()=>{$('model-config').value=JSON.stringify(models[text('family')],null,2);updateBackendTargets();});
+$('family').addEventListener('change',()=>{$('model-config').value=JSON.stringify(models[text('family')],null,2);syncQMMMConfig();updateBackendTargets();if(typeof setManagedFields==='function')setManagedFields();});
 function updateBackendTargets() {
+  const qmmm=text('family')==='tensornet_qmmm';
+  $('qmmm-settings').hidden=!qmmm;
+  for(const node of document.querySelectorAll('.qmmm-field')) node.hidden=!qmmm;
+  $('qmmm-baseline-label').hidden=!qmmm||text('qmmm-baseline-mode')!=='offline';
   const targets=backends[text('family')]?.training_targets||[];
   $('model-config-hint').textContent=backends[text('family')]?.config_hint||'Defaults work for new models; continuation requires the original architecture.';
   const evaluating=text('task-type')!=='training';
-  for(const key of ['energy','forces','charges']) {
+  for(const key of ['energy','forces','charges','mm_forces','mm_potential']) {
     const supported=targets.includes(key);
     $('eval-'+key).disabled=!supported;
     $('weight-'+key).disabled=evaluating||!supported||(key==='charges'&&!$('train-charges').checked);
+  }
+  for(const key of ['mm_forces','mm_potential']) {
+    $('eval-'+key).closest('label').hidden=!qmmm||!evaluating;
+    $('weight-'+key).closest('label').hidden=!qmmm||evaluating;
   }
   $('train-charges').disabled=evaluating||!targets.includes('charges');
   $('charge-constraint').disabled=!targets.includes('charges');
   if(!targets.includes('charges')) $('charge-constraint').checked=false;
 }
+function syncQMMMConfig() {
+  if(text('family')!=='tensornet_qmmm') return;
+  try {
+    const baseline=JSON.parse(text('model-config')).baseline||{mode:'residual_only'};
+    $('qmmm-baseline-mode').value=baseline.mode;
+    $('qmmm-baseline-metadata').value=baseline.mode==='offline'?JSON.stringify(baseline,null,2):'';
+  } catch {}
+  for(const key of ['mm_pos','mm_charges']) if(!text('file-'+key)) $('file-'+key).value=key+'.npy';
+  // Total QM charge is optional; do not inherit the unrelated default mapping.
+  if(text('file-charge')==='total_charge_{shard}.npy') $('file-charge').value='';
+}
+$('qmmm-baseline-mode').addEventListener('change',updateBackendTargets);
+$('model-config').addEventListener('change',()=>{syncQMMMConfig();updateBackendTargets();});
 function updateTaskType() {
   const predicting=text('task-type')==='prediction';
   for(const option of $('family').options) option.disabled=predicting?option.value!=='uma':option.value==='uma';

@@ -3,6 +3,7 @@ from .base import ModelBackend
 from .newtonnet import NewtonNetBackend
 from .torchmdnet import TorchMDNetBackend
 from .mace import MACEBackend
+from .tensornet_qmmm import TensorNetQMMMBackend
 
 
 _backends = {}
@@ -40,3 +41,4 @@ def find_backend(state):
 register_backend(NewtonNetBackend())
 register_backend(TorchMDNetBackend())
 register_backend(MACEBackend())
+register_backend(TensorNetQMMMBackend())

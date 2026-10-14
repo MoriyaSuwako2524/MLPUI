@@ -19,6 +19,8 @@ def save_parity_plots(pairs, metrics, directory, *, should_stop=None):
             from mlpui.training import TrainingStopped
             raise TrainingStopped("Evaluation stopped by user")
         values = np.concatenate(chunks)
+        if values.size == 0:
+            continue  # zero-MM evaluation has valid empty arrays, but no parity plot
         reference, prediction = values.T
         low, high = float(values.min()), float(values.max())
         margin = max((high - low) * .05, max(abs(low), abs(high), 1.) * 1e-6)
