@@ -15,9 +15,9 @@ class NpyDataset(Dataset):
     use the same target fields; units must already match the model.
     """
 
-    targets = ("energy", "forces", "charges", "dipole", "stress", "mm_forces", "mm_potential")
+    targets = ("energy", "forces", "charges", "dipole", "stress", "mm_forces", "mm_potential", "mm_potential_gradient")
     mm_fields = ("mm_pos", "mm_charges", "mm_offsets")
-    baseline_fields = ("baseline_energy", "baseline_forces", "baseline_mm_forces", "baseline_mm_potential")
+    baseline_fields = ("baseline_energy", "baseline_forces", "baseline_mm_forces", "baseline_mm_potential", "baseline_mm_potential_gradient")
 
     def __init__(self, directory, *, files=None, gradients=False, energy_scale=1.0,
                  length_scale=1.0, baseline_metadata=None):
@@ -90,7 +90,7 @@ class NpyDataset(Dataset):
             if name in self.arrays and self.arrays[name].shape not in shapes[reference]:
                 raise ValueError(f"{name}.npy has invalid shape")
         self.mm_ragged = "mm_offsets" in self.arrays
-        mm_names = set(self.mm_fields) | {"mm_forces", "mm_potential", "baseline_mm_forces", "baseline_mm_potential"}
+        mm_names = set(self.mm_fields) | {"mm_forces", "mm_potential", "mm_potential_gradient", "baseline_mm_forces", "baseline_mm_potential", "baseline_mm_potential_gradient"}
         if mm_names & self.arrays.keys():
             if not {"mm_pos", "mm_charges"} <= self.arrays.keys():
                 raise ValueError("MM data requires mm_pos and mm_charges")
@@ -106,7 +106,7 @@ class NpyDataset(Dataset):
             for name in ("mm_charges", "mm_potential", "baseline_mm_potential"):
                 if name in self.arrays and self.arrays[name].shape != mp.shape[:-1]:
                     raise ValueError(f"{name} must match the MM point layout")
-            for name in ("mm_forces", "baseline_mm_forces"):
+            for name in ("mm_forces", "mm_potential_gradient", "baseline_mm_forces", "baseline_mm_potential_gradient"):
                 if name in self.arrays and self.arrays[name].shape != mp.shape:
                     raise ValueError(f"{name} must match mm_pos")
         for name in ("frame_index", "source_index", "short_contact"):
@@ -142,7 +142,7 @@ class NpyDataset(Dataset):
             if name in ("offsets", "mm_offsets"):
                 continue
             key = atomic if name in ("z", "pos", "forces", "charges", "baseline_forces") else index
-            if name in ("mm_pos", "mm_charges", "mm_forces", "mm_potential", "baseline_mm_forces", "baseline_mm_potential"):
+            if name in ("mm_pos", "mm_charges", "mm_forces", "mm_potential", "mm_potential_gradient", "baseline_mm_forces", "baseline_mm_potential", "baseline_mm_potential_gradient"):
                 key = slice(*self.arrays["mm_offsets"][index:index + 2]) if self.mm_ragged else index
             value = values if name == "z" and not self.ragged and values.ndim == 1 else values[key]
             sample[name] = np.array(value, copy=True)
@@ -156,10 +156,13 @@ class NpyDataset(Dataset):
                 sample[name] = sample[name] * factor
         for name, factor in (("mm_forces", self.energy_scale / self.length_scale * (-1 if self.gradients else 1)),
                              ("mm_potential", self.energy_scale),
+                             # GESP is already a gradient, not a force label.
+                             ("mm_potential_gradient", self.energy_scale / self.length_scale),
                              ("baseline_energy", self.energy_scale),
                              ("baseline_forces", self.energy_scale / self.length_scale),
                              ("baseline_mm_forces", self.energy_scale / self.length_scale),
-                             ("baseline_mm_potential", self.energy_scale)):
+                             ("baseline_mm_potential", self.energy_scale),
+                             ("baseline_mm_potential_gradient", self.energy_scale / self.length_scale)):
             if name in sample:
                 sample[name] = sample[name] * factor
         if self.baseline_metadata is not None:

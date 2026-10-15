@@ -15,6 +15,7 @@ OUTPUT_ALIASES = {
     "stress": ("stress",),
     "mm_forces": ("mm_forces",),
     "mm_potential": ("mm_potential",),
+    "mm_potential_gradient": ("mm_potential_gradient",),
 }
 
 

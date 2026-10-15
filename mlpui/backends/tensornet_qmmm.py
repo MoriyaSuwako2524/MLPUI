@@ -12,7 +12,7 @@ class TensorNetQMMMBackend(ModelBackend):
     label = 'TensorNet-QMMM'
     web_supported = True
     supports_evaluation_artifacts = True
-    training_targets = ('energy', 'forces', 'mm_forces', 'mm_potential')
+    training_targets = ('energy', 'forces', 'mm_forces', 'mm_potential', 'mm_potential_gradient')
 
     def default_config(self):
         return dict(schema_version=1, precision=32, embedding_dimension=64, num_layers=3,
@@ -141,7 +141,8 @@ class TensorNetQMMMBackend(ModelBackend):
             raise ValueError('QMMM residual currently supports spin=0 only')
         baseline = {}
         shapes = {'energy': ((), (1,)), 'forces': (tuple(pos.shape),),
-                  'mm_forces': (tuple(mp.shape),), 'mm_potential': (tuple(mq.shape),)}
+                  'mm_forces': (tuple(mp.shape),), 'mm_potential': (tuple(mq.shape),),
+                  'mm_potential_gradient': (tuple(mp.shape),)}
         for prop, allowed in shapes.items():
             key = 'baseline_' + prop
             if key in sample:

@@ -36,15 +36,15 @@ function payload() {
   const evaluating=text('task-type')!=='training';
   const selected=datasetRecords.find(d=>d.id===text('managed-train'));
   const weights={};
-  for(const key of ['energy','forces','charges','mm_forces','mm_potential']) {
+  for(const key of ['energy','forces','charges','mm_forces','mm_potential','mm_potential_gradient']) {
     if(!backends[text('family')]?.training_targets.includes(key)) continue;
     if(evaluating) {if($('eval-'+key).checked) weights[key]=1;}
     else if((key!=='charges'||$('train-charges').checked)&&number('weight-'+key)>0) weights[key]=number('weight-'+key);
   }
   if(!Object.keys(weights).length) throw new Error('Select at least one supported training or evaluation target');
   const files={};
-  for(const key of ['z','pos','energy','forces','charges','cell','pbc','offsets','mm_pos','mm_charges','mm_offsets','mm_forces','mm_potential','baseline_energy','baseline_forces','baseline_mm_forces','baseline_mm_potential','frame_index','source_index','short_contact']) {
-    if(['energy','forces','charges','mm_forces','mm_potential'].includes(key) && !(key in weights)) continue;
+  for(const key of ['z','pos','energy','forces','charges','cell','pbc','offsets','mm_pos','mm_charges','mm_offsets','mm_forces','mm_potential','mm_potential_gradient','baseline_energy','baseline_forces','baseline_mm_forces','baseline_mm_potential','baseline_mm_potential_gradient','frame_index','source_index','short_contact']) {
+    if(['energy','forces','charges','mm_forces','mm_potential','mm_potential_gradient'].includes(key) && !(key in weights)) continue;
     if(key.startsWith('mm_')||key.startsWith('baseline_')) {if(text('family')!=='tensornet_qmmm') continue;}
     if(text('file-'+key)) files[key]=text('file-'+key);
   }
@@ -228,12 +228,12 @@ function updateBackendTargets() {
   const targets=backends[text('family')]?.training_targets||[];
   $('model-config-hint').textContent=backends[text('family')]?.config_hint||'Defaults work for new models; continuation requires the original architecture.';
   const evaluating=text('task-type')!=='training';
-  for(const key of ['energy','forces','charges','mm_forces','mm_potential']) {
+  for(const key of ['energy','forces','charges','mm_forces','mm_potential','mm_potential_gradient']) {
     const supported=targets.includes(key);
     $('eval-'+key).disabled=!supported;
     $('weight-'+key).disabled=evaluating||!supported||(key==='charges'&&!$('train-charges').checked);
   }
-  for(const key of ['mm_forces','mm_potential']) {
+  for(const key of ['mm_forces','mm_potential','mm_potential_gradient']) {
     $('eval-'+key).closest('label').hidden=!qmmm||!evaluating;
     $('weight-'+key).closest('label').hidden=!qmmm||evaluating;
   }

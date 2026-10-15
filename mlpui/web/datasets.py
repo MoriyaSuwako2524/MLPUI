@@ -70,7 +70,7 @@ def export_subset(data, indices, directory):
         raise ValueError("Cannot combine different baseline identities")
     frame_index, _, masks = _validated_sidecars(data)
     qm = {"z", "pos", "forces", "charges", "baseline_forces"}
-    mm = {"mm_pos", "mm_charges", "mm_forces", "mm_potential", "baseline_mm_forces", "baseline_mm_potential"}
+    mm = {"mm_pos", "mm_charges", "mm_forces", "mm_potential", "mm_potential_gradient", "baseline_mm_forces", "baseline_mm_potential", "baseline_mm_potential_gradient"}
     counts = {"qm": [], "mm": []}
     for i in indices:
         sample = data[int(i)]

@@ -226,3 +226,88 @@ checkpoint roundtrip, provenance guards and Web upload/split/train/evaluate/down
 frames, both baseline modes, isolated random-port servers and real worker
 processes. It compares downloaded predictions with the downloaded/reloaded model.
 No real-data training or online UMA/charge provider integration is implied.
+
+## Fixed-response potential gradient
+
+The optional `mm_potential_gradient` target is GESP in eV/(e Angstrom),
+with shape [total MM points,3] for ragged data. Its sign is the spatial
+gradient of potential, opposite to electric field. `gradients=True` only
+changes force-label signs; it does not negate this target. Unit conversion
+is energy_scale/length_scale. Offline mode additionally requires
+`baseline_mm_potential_gradient` with the same shape and units.
+
+The residual energy depends on MM sites through QM-site potential phi and
+electric field F. With r=R_QM-R_MM, a=dE/dphi and b=dE/dF, the instantaneous
+response potential is k sum(a/r + b.r/r^3). GESP holds a,b fixed while taking
+the spatial derivative: k sum(a*r/r^3 + 3*r*(b.r)/r^5 - b/r^3).
+The implementation keeps coefficient derivatives with respect to network
+weights so GESP supervision trains the network. It does not use the total
+mixed derivative d(dE/dq_MM)/dR_MM, which includes unwanted response terms.
+It never divides by q_MM, so zero and small charges remain well defined.
+For the present descriptor, MM force equals -q_MM*GESP, but training on GESP
+uses an unweighted per-component error, avoiding q_MM-squared weighting.
+
+More precisely, `TensorNetQMMM.forward` obtains the physical, unscaled phi and
+field tensors from `_energy_with_environment`, then obtains a,b with
+`torch.autograd.grad(..., create_graph=self.training)`. No production tensor is
+detached. `fixed_response_mm_properties` constructs the analytic **partial**
+derivative of the Coulomb kernels at fixed a,b (and fixed QM geometry) rather
+than asking autograd for a total coordinate derivative of a,b. Thus the graph
+still contains da/dtheta and db/dtheta for training parameters theta. Only
+the finite-difference test detaches a,b to hold their values fixed while
+moving an independent probe coordinate.
+
+QM forces remain the full -dE/dR_QM, including representation and environment
+derivatives. ESP remains dE/dq_MM; MM forces remain the full -dE/dR_MM. Because
+MM positions enter this model only through the linear-in-q Coulomb descriptors,
+the chain rule gives F_MM=-q_MM*GESP exactly, independently of training fit.
+The total derivative d(ESP)/dR_MM includes da/dR_MM and db/dR_MM and is generally
+different from fixed-response GESP. Its Maxwell relation to -d(F_MM)/dq_MM
+includes those response terms; it must not be replaced by GESP alone. Adding
+an explicit MM-position energy term or coordinate-dependent selection later
+would require revisiting this identity. This construction defines the model's
+fixed learned response, not an explicit electronic-density reconstruction.
+These derivative identities refer to the residual model. In `offline` mode,
+separately supplied baseline values are added to each output; their physical
+consistency cannot be established by differentiating the supplied scalar energy
+array. The existing offline derivative contract still applies, and arbitrary
+baseline arrays need not satisfy F_MM=-q_MM*GESP. The CM preparation script
+produces residual-only labels and requires the original baseline provenance.
+
+The implementation is in `mlpui/models/tensornet_qmmm/model.py`; numeric tests
+are in `tests/test_qmmm_gesp.py`. Tests check full-energy coordinate/charge
+finite differences, unchanged E/F/ESP when GESP is requested, frozen-response
+probe finite differences, an explicit counterexample to the total mixed
+derivative, zero/small MM charges, O(3) transformations, each target's parameter
+backward, frame normalization, and checkpoint reproduction.
+
+For residual CM targets, subtract the same gas-charge Coulomb potential and
+fixed-charge spatial gradient used by the E/F baseline. UMA gas energy has
+no MM derivative. QM force baselines must retain dq/dR; that requirement
+does not introduce dq/dR_MM into the fixed-charge spatial GESP baseline.
+Match checkpoint identity, projection, Coulomb constant, geometry and frame
+IDs before constructing residual labels. Do not replace E/F residuals.
+
+Training and validation loss use a component mean within each frame, then
+an equal frame mean (empty MM contributes zero). Standalone evaluation
+instead pools scalar components and reports its component count. Initial
+four-target weights should be inverse squared train-only RMS scales,
+computed with the same per-frame convention and recorded with their units.
+Validation selects stopping; test/guard frames must not set scales or be
+attached to the training job. Existing E/F configurations remain valid.
+
+`python -m scripts.prepare_cm_fourtarget --help` documents the CM importer.
+Its inputs are the original mm10A/npys directory, verified ESP npys directory,
+downloaded gas prediction artifacts, original residual E/F train/validation
+directories, a new output directory and a reviewed baseline contract JSON.
+The contract requires `gas_charge_checkpoint_sha256`, `gas_prediction_sha256`,
+`coulomb_constant`, `charge_projection` (`as_saved` or `uniform_total_charge`),
+`qm_force_includes_dq_dR: true`, `mm_self_excluded: true`, and
+`ef_source_sha256` mapping train/validation to energy/forces file hashes.
+Obtain this contract from the original preparation code and artifacts; the
+importer cannot establish its truth from the E/F residual arrays alone.
+It verifies the fixed split, atomic numbers, geometry, MM charges and all ESP
+export hashes, copies E/F bytes unchanged, and writes only train/validation.
+It refuses an existing output directory. Use the resulting `scales.json`
+loss_weights in a new run with the original architecture and seed, attaching
+validation only. `preparation.json` records the complete input identities.

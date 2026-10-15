@@ -13,8 +13,8 @@ import numpy as np
 from mlpui.data import NpyDataset, NpyShards
 
 
-ATOMIC_PROPERTIES = {"forces", "charges", "mm_forces", "mm_potential"}
-MM_PROPERTIES = {"mm_forces", "mm_potential"}
+ATOMIC_PROPERTIES = {"forces", "charges", "mm_forces", "mm_potential", "mm_potential_gradient"}
+MM_PROPERTIES = {"mm_forces", "mm_potential", "mm_potential_gradient"}
 SPLIT_MASKS = ("is_train", "is_validation", "is_test", "is_guard")
 
 
@@ -156,7 +156,7 @@ def save_evaluation_artifacts(observations, data, directory, *, metadata=None):
         mm_counts = np.asarray([len(data[i].get("mm_pos", [])) for i in range(len(data))], dtype=np.int64)
         variable_mm = bool(len(np.unique(mm_counts)) > 1)
         qmmm = (metadata or {}).get("model_family") == "tensornet_qmmm"
-        units = {"energy": "eV", "forces": "eV/angstrom", "mm_forces": "eV/angstrom", "mm_potential": "eV/e"}
+        units = {"energy": "eV", "forces": "eV/angstrom", "mm_forces": "eV/angstrom", "mm_potential": "eV/e", "mm_potential_gradient": "eV/(e*angstrom)"}
         files, properties = {}, {}
         for prop, pairs in observations.items():
             if len(pairs) != len(data):

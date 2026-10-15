@@ -106,6 +106,21 @@ test('zero-MM evaluation displays empty metrics, units and downloads',()=>{
   assert.match(ui.element('evaluation-artifacts').innerHTML,/mm_counts.npy/);
 });
 
+test('GESP selection survives UI payload and requires its own labels',()=>{
+  const ui=dashboard();
+  ui.context.structuredClone=structuredClone;
+  ui.context.document.querySelectorAll=()=>[];
+  vm.runInContext("let datasetRecords=[]; backends={tensornet_qmmm:{training_targets:['energy','forces','mm_potential','mm_potential_gradient']}};",ui.context);
+  for(const [key,value] of Object.entries({'family':'tensornet_qmmm','task-type':'evaluation','model-config':'{}','qmmm-baseline-mode':'residual_only','checkpoint':'downloaded.pt','energy-scale':'1','length-scale':'1','dtype':'float64','device':'cpu'}))ui.element(key).value=value;
+  for(const key of ['z','pos','mm_pos','mm_charges','mm_offsets','mm_potential_gradient'])ui.element('file-'+key).value=key+'.npy';
+  ui.element('eval-mm_potential_gradient').checked=true;
+  vm.runInContext('updateBackendTargets(); result=payload();',ui.context);
+  assert.deepEqual(JSON.parse(JSON.stringify(ui.context.result.training.loss_weights)),{mm_potential_gradient:1});
+  assert.equal(ui.context.result.evaluation.files.mm_potential_gradient,'mm_potential_gradient.npy');
+  ui.element('file-mm_potential_gradient').value='';
+  assert.throws(()=>vm.runInContext('payload()',ui.context),/missing mm_potential_gradient labels/);
+});
+
 
 test('switching to QMMM after selecting a managed dataset restores offline identity',()=>{
   const ui=dashboard();

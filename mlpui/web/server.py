@@ -248,7 +248,7 @@ def make_server(root, port=8675, host="127.0.0.1"):
                     import torch
                     return self.respond({"models": presets(), "backends": backend_metadata(), "cuda": torch.cuda.is_available(),
                                          "root": str(manager.root)})
-                match = re.fullmatch(r"/api/jobs/([a-f0-9]{32})(?:/(log|config|evaluation|prediction|(?:energy|forces|offsets)\.npy|model|best|plots/(?:energy|forces|charges|dipole|stress|mm_forces|mm_potential)\.(?:png|svg)|artifacts/[a-z][a-z0-9_]*\.(?:npy|json)|checkpoints/epoch_[0-9]{6,}\.pt))?", path)
+                match = re.fullmatch(r"/api/jobs/([a-f0-9]{32})(?:/(log|config|evaluation|prediction|(?:energy|forces|offsets)\.npy|model|best|plots/(?:energy|forces|charges|dipole|stress|mm_forces|mm_potential|mm_potential_gradient)\.(?:png|svg)|artifacts/[a-z][a-z0-9_]*\.(?:npy|json)|checkpoints/epoch_[0-9]{6,}\.pt))?", path)
                 if match:
                     job_id, action = match.groups()
                     folder = manager.folder(job_id)

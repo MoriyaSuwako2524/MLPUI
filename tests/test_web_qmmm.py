@@ -27,7 +27,8 @@ def arrays():
 
 
 @pytest.mark.parametrize('offline', [False, True])
-def test_http_qmmm_end_to_end(tmp_path, offline):
+@pytest.mark.parametrize('gesp', [False, True])
+def test_http_qmmm_end_to_end(tmp_path, offline, gesp):
     server=make_server(tmp_path/'runs',0)
     threading.Thread(target=server.serve_forever,daemon=True).start()
     base=f'http://127.0.0.1:{server.server_port}'
@@ -41,6 +42,9 @@ def test_http_qmmm_end_to_end(tmp_path, offline):
         c=offline_config() if offline else config()
         values=arrays()
         props=('energy','forces','mm_forces','mm_potential')
+        if gesp:
+            props += ('mm_potential_gradient',)
+            values['mm_potential_gradient']=np.zeros_like(values['mm_pos'])
         if offline:
             values.update({'baseline_'+p:np.ones_like(values[p])*.02 for p in props})
         entry=post('/api/datasets',{'name':'Synthetic dual region'})
@@ -105,7 +109,10 @@ def test_http_qmmm_end_to_end(tmp_path, offline):
         np.testing.assert_array_equal(artifact('short_contact.npy'),[1,0])
         assert state['evaluation']['metrics']['mm_forces']['count']==6
         assert download('/api/jobs/'+job['id']+'/plots/mm_forces.png').startswith(b'\x89PNG')
-        predictions=[predict(loaded,dataset(specs['test'])[i]) for i in range(2)]
+        predictions=[predict(loaded,dataset(specs['test'])[i],props) for i in range(2)]
+        if gesp:
+            assert manifest['properties']['mm_potential_gradient']['unit']=='eV/(e*angstrom)'
+            assert download('/api/jobs/'+job['id']+'/plots/mm_potential_gradient.png').startswith(b'\x89PNG')
         for p in props:
             expected=np.array([v[p].item() for v in predictions]) if p=='energy' else np.concatenate([v[p].detach().numpy() for v in predictions])
             np.testing.assert_allclose(artifact(p+'_pred.npy').reshape(-1),expected.reshape(-1),atol=1e-10,rtol=1e-10)
