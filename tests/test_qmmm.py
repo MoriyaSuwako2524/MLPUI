@@ -302,13 +302,13 @@ def test_checkpoint_physics_override_rejected(tmp_path):
     t = Trainer('tensornet_qmmm', config(), TrainingConfig(dtype=torch.float64))
     path = t.save(tmp_path / 'model.pt')
     altered = config()
-    altered['field_scale'] = 2.
+    altered['ext_cutoff_upper'] = 8.
     with pytest.raises(ValueError, match='cannot be overridden'):
         load_external_checkpoint(path, model_config=altered)
     saved = torch.load(path, weights_only=True)
-    saved['state_dict']['qmmm_schema'] = torch.tensor(2)
+    saved['state_dict']['qmmm_schema'] = torch.tensor(1)
     torch.save(saved, tmp_path / 'bad_schema.pt')
-    with pytest.raises(ValueError, match='weight schema'):
+    with pytest.raises(ValueError, match='Incompatible QMMM architecture'):
         load_external_checkpoint(tmp_path / 'bad_schema.pt')
 
 

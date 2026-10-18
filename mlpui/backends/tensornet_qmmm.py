@@ -15,27 +15,38 @@ class TensorNetQMMMBackend(ModelBackend):
     training_targets = ('energy', 'forces', 'mm_forces', 'mm_potential', 'mm_potential_gradient')
 
     def default_config(self):
-        return dict(schema_version=1, precision=32, embedding_dimension=64, num_layers=3,
-            num_rbf=32, max_num_neighbors=64, cutoff_upper=5., environment_cutoff=10.,
-            environment_mode='fixed_reference_selection', potential_scale=1., field_scale=1.,
+        return dict(schema_version=2, architecture='tensornet_ext_v1', precision=32, embedding_dimension=128, num_layers=2,
+            num_rbf=32, max_num_neighbors=64, cutoff_upper=4.5, environment_cutoff=10.,
+            ext_num_rbf=32, ext_rbf_type='expnorm', ext_trainable_rbf=False,
+            ext_cutoff_lower=0., ext_cutoff_upper=10.,
+            environment_mode='fixed_reference_selection',
             units={'length': 'angstrom', 'energy': 'eV', 'charge': 'e'},
             baseline={'mode': 'residual_only'})
 
     def _config(self, supplied):
+        if supplied.get('schema_version', 2) != 2 or supplied.get('architecture', 'tensornet_ext_v1') != 'tensornet_ext_v1':
+            raise ValueError('Incompatible QMMM architecture: legacy H+3 configuration is unsupported')
         config = self.default_config()
         if set(supplied) - set(config):
             raise ValueError(f'Unknown QMMM config fields: {set(supplied) - set(config)}')
         config.update(copy.deepcopy(supplied))
-        if type(config['schema_version']) is not int or config['schema_version'] != 1:
+        if type(config['schema_version']) is not int or config['schema_version'] != 2:
             raise ValueError('Unsupported QMMM schema_version')
         if config['precision'] not in (32, 64):
             raise ValueError('QMMM precision must be 32 or 64')
-        for key in ('embedding_dimension', 'num_layers', 'num_rbf', 'max_num_neighbors'):
+        for key in ('embedding_dimension', 'num_layers', 'num_rbf', 'ext_num_rbf', 'max_num_neighbors'):
             if type(config[key]) is not int or config[key] < 1:
                 raise ValueError(f'{key} must be a positive integer')
-        for key in ('cutoff_upper', 'potential_scale', 'field_scale'):
+        for key in ('cutoff_upper', 'ext_cutoff_upper'):
             if not isinstance(config[key], (int, float)) or not math.isfinite(config[key]) or config[key] <= 0:
                 raise ValueError(f'{key} must be finite and positive')
+        if config['embedding_dimension'] < 2:
+            raise ValueError('embedding_dimension must be at least 2')
+        if config['ext_rbf_type'] not in ('expnorm', 'gauss') or type(config['ext_trainable_rbf']) is not bool:
+            raise ValueError('Invalid external RBF configuration')
+        lower = config['ext_cutoff_lower']
+        if not isinstance(lower, (int, float)) or not math.isfinite(lower) or not 0 <= lower < config['ext_cutoff_upper']:
+            raise ValueError('ext_cutoff_lower must be finite and 0 <= lower < upper')
         if config['environment_cutoff'] != 10. or config['environment_mode'] != 'fixed_reference_selection':
             raise ValueError('First-release QMMM requires a fixed reference-selected 10 A environment')
         if config['units'] != {'length': 'angstrom', 'energy': 'eV', 'charge': 'e'}:
@@ -92,8 +103,8 @@ class TensorNetQMMMBackend(ModelBackend):
     def load_model(self, state, config):
         if not config:
             raise ValueError('QMMM loading requires model_config')
-        if 'qmmm_schema' not in state or state['qmmm_schema'].numel() != 1 or state['qmmm_schema'].item() != 1:
-            raise ValueError('Unsupported QMMM weight schema')
+        if 'qmmm_schema' not in state or state['qmmm_schema'].numel() != 1 or state['qmmm_schema'].item() != 2:
+            raise ValueError('Incompatible QMMM architecture: legacy H+3 weights cannot load into TensorNet-ext')
         model = self.build_model(config)
         model.load_state_dict(state, strict=True)
         return model
@@ -134,13 +145,30 @@ class TensorNetQMMMBackend(ModelBackend):
             raise ValueError('QM atomic numbers must be integers 1..118')
         if not all(torch.isfinite(v).all() for v in inputs.values()):
             raise ValueError('Non-finite QMMM input')
-        inputs['charge'] = torch.tensor(float(np.asarray(sample.get('charge', 0)).item()), device=device, dtype=dtype)
-        if not torch.isfinite(inputs['charge']):
+        batched = 'batch' in sample
+        if not batched and ('mm_batch' in sample or 'mm_offsets' in sample):
+            raise ValueError('MM batch metadata requires QM batch IDs')
+        count = 1
+        if batched:
+            for key in ('batch', 'mm_batch', 'mm_offsets'):
+                if key in sample:
+                    raw = np.asarray(sample[key])
+                    if raw.dtype.kind not in 'iu':
+                        raise ValueError(f'{key} must contain integers')
+                    inputs[key] = torch.tensor(raw, device=device, dtype=torch.long)
+            from mlpui.models.tensornet_qmmm.model import TensorNetQMMM
+            _, _, _, count = TensorNetQMMM.region_batches(
+                z, mp, inputs['batch'], inputs.get('mm_batch'), inputs.get('mm_offsets'))
+        raw_charge = np.asarray(sample.get('charge', np.zeros(count) if batched else 0))
+        if (batched and raw_charge.shape != (count,)) or (not batched and raw_charge.size != 1):
+            raise ValueError('Supply one total QM charge per structure')
+        inputs['charge'] = torch.tensor(raw_charge, device=device, dtype=dtype)
+        if not torch.isfinite(inputs['charge']).all():
             raise ValueError('QM charge must be finite')
-        if float(np.asarray(sample.get('spin', 0)).item()) != 0:
+        if np.any(np.asarray(sample.get('spin', 0)) != 0):
             raise ValueError('QMMM residual currently supports spin=0 only')
         baseline = {}
-        shapes = {'energy': ((), (1,)), 'forces': (tuple(pos.shape),),
+        shapes = {'energy': ((count,),) if batched else ((), (1,)), 'forces': (tuple(pos.shape),),
                   'mm_forces': (tuple(mp.shape),), 'mm_potential': (tuple(mq.shape),),
                   'mm_potential_gradient': (tuple(mp.shape),)}
         for prop, allowed in shapes.items():
@@ -149,7 +177,7 @@ class TensorNetQMMMBackend(ModelBackend):
                 value = torch.tensor(np.asarray(sample[key]), device=device, dtype=dtype)
                 if tuple(value.shape) not in allowed or not torch.isfinite(value).all():
                     raise ValueError(f'Invalid {key}')
-                baseline[key] = value.reshape(()) if prop == 'energy' else value
+                baseline[key] = value.reshape(()) if prop == 'energy' and not batched else value
         if baseline and model.config['baseline']['mode'] != 'offline':
             raise ValueError('Baseline arrays require explicit offline mode and provenance')
         if model.config['baseline']['mode'] == 'offline':

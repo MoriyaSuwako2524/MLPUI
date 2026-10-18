@@ -71,3 +71,16 @@ SHA256 `b80407edf6b2a1ec8523668c2a36852d20927ce1c3c56b70983a9f2dc53233ad`.
   against the bundled core for exact energy, forces, features, periodic stress
   and training parameter gradients using identical weights/graphs. It runs in a
   separate process and does not change production module resolution.
+
+
+## TensorNet-ext QM/MM interactions
+
+`mlpui/models/tensornet_qmmm/ext.py` adapts the TensorNet-ext external and
+interaction layers from panxl/torchmd-net commit
+`b0f7c7b42c6304c016a9e3dee78d4e2f4cbadc7d` (MIT).
+Source: https://github.com/panxl/torchmd-net/blob/b0f7c7b42c6304c016a9e3dee78d4e2f4cbadc7d/torchmdnet/models/tensornet_ext.py
+License: `tensornet_qmmm/LICENSE.tensornet-ext` (included in package data).
+The QM embedding uses the existing vendored TensorNet implementation.
+Tests retain the unmodified upstream file in `tests/fixtures/` with its license
+and execute definitions only, without upstream global precision settings.
+See `docs/tensornet-qmmm.md` for ragged-edge and zero-charge derivative adaptations.

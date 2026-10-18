@@ -40,6 +40,8 @@ def test_http_qmmm_end_to_end(tmp_path, offline, gesp):
             return response.read()
     try:
         c=offline_config() if offline else config()
+        assert c['architecture']=='tensornet_ext_v1' and c['schema_version']==2
+        c['ext_cutoff_upper']=7.5
         values=arrays()
         props=('energy','forces','mm_forces','mm_potential')
         if gesp:
@@ -92,6 +94,8 @@ def test_http_qmmm_end_to_end(tmp_path, offline, gesp):
         checkpoint=tmp_path/'downloaded.pt'
         checkpoint.write_bytes(download('/api/jobs/'+job['id']+'/model'))
         loaded=load_external_checkpoint(checkpoint,device='cpu',dtype=torch.float64).model
+        assert loaded.config['ext_cutoff_upper']==7.5
+        assert loaded.config['architecture']=='tensornet_ext_v1'
         evaluation=dict(name='Synthetic evaluation',family='tensornet_qmmm',model_config=c,
             training=payload['training'],task_type='evaluation',evaluation=specs['test'],checkpoint=str(checkpoint))
         job=post('/api/jobs',evaluation); state=wait_job(server.manager,job['id'])

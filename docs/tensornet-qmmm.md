@@ -1,9 +1,10 @@
-# TensorNet-QMMM: fixed-environment prototype
+# TensorNet-QMMM: TensorNet-ext residual architecture
 
-This is a new TensorNet adaptation, not a reproduction of the Pan DeepPot-SE
-architecture. It uses the bundled
-`mlpui.models.torchmdnet.models.tensornet.TensorNet`; the old standalone TensorNet
-directory is unchanged. There is no QM/MM-AC, periodic embedding or MD adapter.
+Schema 2 (`architecture: tensornet_ext_v1`) replaces the original H+3 head.
+It follows [panxl/torchmd-net at b0f7c7b](https://github.com/panxl/torchmd-net/tree/b0f7c7b42c6304c016a9e3dee78d4e2f4cbadc7d).
+Legacy schema-1 checkpoints are rejected with an architecture-incompatibility
+error, including direct non-strict state loading. Existing files are not changed.
+This is a finite, nonperiodic residual adaptation; there is no QM/MM-AC or MD adapter.
 
 ## Energy and baseline semantics
 
@@ -85,8 +86,11 @@ All files are numeric NPY without pickle. Units after conversion are angstrom,
 eV and elementary charge. The Coulomb coefficient is 14.3996454784255 eV A/e^2.
 Use `energy_scale` and `length_scale` to convert raw arrays; charges are already
 in e. Fixed environments are selected upstream within 10 A of a reference QM
-geometry. All supplied MM points are used, with no runtime distance filtering,
-switching, reselection or claims of MD cutoff continuity.
+geometry. This **data selection** remains fixed. The neural external message
+separately uses `ext_cutoff_upper` (default 10 A) with the upstream cosine
+cutoff and RBF envelope; pairs outside it contribute zero neural residual.
+The gas-charge Coulomb baseline still uses all supplied MM points, without
+this neural cutoff. No periodic minimum image, reselection or softening is added.
 
 | Field | Dense layout | Ragged layout |
 |---|---|---|
@@ -128,25 +132,35 @@ derivatives from MM force/potential reference labels as well.
 
 ## Architecture and differentiation
 
-TensorNet produces invariant QM features. The environment branch computes
-potential phi and polar field E differentiably from QM/MM coordinates and MM
-charges. A residual atomic scalar head consumes the QM features and three
-O(3) invariants: phi, E.E, and E.g, where g is a smoothly weighted sum of QM
-relative vectors. Atomic energies are summed. Translation, rotation,
-reflection and independent atom/point permutations are tested. This is a
-minimal descriptor, not a claim of the paper's expressive power or accuracy.
-The single E.g projection loses directional information: fields with identical
-norm and projection on g are indistinguishable to that atomic head. At g=0 it
-retains only field magnitude. Symmetry correctness does not imply angular
-completeness; anisotropic response may require additional independent geometric
-channels or equivariant tensor fusion in a later architecture version.
+For each within-frame QM-MM edge, r=R_QM-R_MM, u=r/|r|. The external
+radial basis passes through K->H->2H->3H linear layers with SiLU after **each**.
+After multiplying by q_MM and the cosine cutoff, its three channels weight
+I, skew(u), and u outer u - I/3. Their sum aggregates into [N_QM,H,3,3].
+This message is computed once and added to the QM message in every Interaction,
+before the upstream O(3) tensor update. There is no MM-MM message passing.
+The upstream invariant readout and Scalar head H->H/2->1 produce atomic
+energies, summed per structure. The old phi/|E|^2/E.g head is removed.
+The nonlinear interactions allow charge/environment response despite the
+charge-linear external message. Total QM charge is retained for baseline/data
+contracts; upstream ext does not condition its residual on total QM charge.
+Train a consistent charge state; this residual does not distinguish electronic
+charge states with identical geometry and external charges.
 
-Forces and potential are differentiated from the same residual scalar.
-Training retains higher derivatives for force/potential losses. Coincident
-QM/MM sites (distance below 1e-6 A) are rejected rather than silently softened.
-Descriptor computation uses dense QM-MM pairs; large environment performance
-is not established. The existing TensorNet neighbor backend may use its
-quadratic PyTorch fallback when compiled operators are absent.
+Defaults follow the upstream **class**: H=128, two layers, QM cutoff=4.5 A,
+32 QM and 32 external expnorm RBFs, external cutoff=10 A, SiLU, O(3),
+non-trainable RBFs. Upstream CLI uses a conflicting 5 A external cutoff;
+MLPUI explicitly chooses 10 A, shared by Python/Web/YAML. External cutoff,
+RBF count/type/trainability and lower bound are serialized and configurable.
+Existing loss weights, split handling and short-contact flags are unchanged.
+
+Upstream adaptations: explicit ragged batch/offset indexing replaces fixed-count
+reshape; index_add with N_QM size preserves isolated/trailing atoms and empty MM
+regions. Coincident QM/MM sites (<1e-6 A) raise rather than being softened.
+Per-frame dense pair construction avoids cross-frame pairs. The vendored QM
+neighbor backend may use its quadratic CPU fallback. No upstream global TF32
+settings or ESP/GESP EMA training code is imported; MLPUI's existing independent
+target losses remain in use, avoiding upstream esp_grad/esp EMA-key coupling.
+The adapted interactions and pinned test fixture retain MIT attribution/license.
 
 ## Training and loading
 
@@ -160,8 +174,11 @@ consistent with the selected baseline mode:
 Python: `Trainer('tensornet_qmmm', model_config, TrainingConfig(...))` accepts
 `NpyDataset`/`NpyShards`. For inference, use the backend's `prepare_sample()` and
 `forward()` with a model loaded by `load_external_checkpoint()`. Model `forward`
-is single-structure; the existing trainer accumulates per-structure gradients
-for batches. Raw `model.energy_components()` only returns the residual.
+accepts a single structure or concatenated regions with QM `batch` and either
+MM `mm_batch` or nondecreasing `mm_offsets`; batched total `charge` has shape [B].
+The backend accepts the same batch metadata and shape-checked offline arrays.
+The existing trainer still accumulates per-structure gradients for batches.
+Raw `model.energy_components()` only returns the residual.
 
 Checkpoints store complete configuration, baseline metadata and strict state
 dict under a unique backend and weight-schema marker. Loading rejects missing
@@ -177,8 +194,8 @@ baseline; it does not establish a self-contained total-energy MD potential.
 
 ## Deliberate first-release boundaries
 
-No real Pete data has been paired, converted or trained here. Gas charge
-prediction arrays are not charge-model weights. Real-data use still needs
+Architecture unit tests do not establish trained accuracy. Gas charge
+prediction arrays are not charge-model weights. Real-data use requires
 frame matching, unit, gas-model identity and embedded energy/self-energy checks.
 
 Web training and evaluation support dual-region uploads/imports, splitting and
@@ -236,37 +253,24 @@ changes force-label signs; it does not negate this target. Unit conversion
 is energy_scale/length_scale. Offline mode additionally requires
 `baseline_mm_potential_gradient` with the same shape and units.
 
-The residual energy depends on MM sites through QM-site potential phi and
-electric field F. With r=R_QM-R_MM, a=dE/dphi and b=dE/dF, the instantaneous
-response potential is k sum(a/r + b.r/r^3). GESP holds a,b fixed while taking
-the spatial derivative: k sum(a*r/r^3 + 3*r*(b.r)/r^5 - b/r^3).
-The implementation keeps coefficient derivatives with respect to network
-weights so GESP supervision trains the network. It does not use the total
-mixed derivative d(dE/dq_MM)/dR_MM, which includes unwanted response terms.
-It never divides by q_MM, so zero and small charges remain well defined.
-For the present descriptor, MM force equals -q_MM*GESP, but training on GESP
-uses an unweighted per-component error, avoiding q_MM-squared weighting.
+Write the shared external message m_i=sum_a q_a K_ia(R) and
+c_i=dE/dm_i, including every layer that reuses m. ESP is dE/dq_a=sum_i c_i:K_ia.
+GESP is the **fixed-response** derivative sum_i c_i:dK_ia/dR_a. This equals
+(dE/dR_a)/q_a for nonzero q_a, with the upstream gradient sign (not force).
+It is not d(ESP)/dR_a, which also differentiates c and includes response terms.
 
-More precisely, `TensorNetQMMM.forward` obtains the physical, unscaled phi and
-field tensors from `_energy_with_environment`, then obtains a,b with
-`torch.autograd.grad(..., create_graph=self.training)`. No production tensor is
-detached. `fixed_response_mm_properties` constructs the analytic **partial**
-derivative of the Coulomb kernels at fixed a,b (and fixed QM geometry) rather
-than asking autograd for a total coordinate derivative of a,b. Thus the graph
-still contains da/dtheta and db/dtheta for training parameters theta. Only
-the finite-difference test detaches a,b to hold their values fixed while
-moving an independent probe coordinate.
+The implementation first computes c, then creates an independent probe node
+Rprobe=R_MM.clone() and evaluates unit-charge kernels at that probe. Differentiating
+sum_i c_i:sum_a K_ia(Rprobe) with respect to Rprobe holds c fixed spatially.
+It includes radial basis, cosine cutoff and direction derivatives. c is **not**
+detached, so GESP-loss backpropagation includes dc/dtheta as well as kernel-weight
+derivatives. No division by charge or epsilon substitution occurs; zero-charge
+sites have the finite continuous response-kernel limit. The same algorithm
+supports empty MM regions and retains training graphs.
 
-QM forces remain the full -dE/dR_QM, including representation and environment
-derivatives. ESP remains dE/dq_MM; MM forces remain the full -dE/dR_MM. Because
-MM positions enter this model only through the linear-in-q Coulomb descriptors,
-the chain rule gives F_MM=-q_MM*GESP exactly, independently of training fit.
-The total derivative d(ESP)/dR_MM includes da/dR_MM and db/dR_MM and is generally
-different from fixed-response GESP. Its Maxwell relation to -d(F_MM)/dq_MM
-includes those response terms; it must not be replaced by GESP alone. Adding
-an explicit MM-position energy term or coordinate-dependent selection later
-would require revisiting this identity. This construction defines the model's
-fixed learned response, not an explicit electronic-density reconstruction.
+QM forces remain the full -dE/dR_QM, ESP is +dE/dq_MM, and MM forces are
+-dE/dR_MM. The chain rule gives F_MM=-q_MM*GESP for this residual architecture.
+This defines the learned fixed response, not an explicit electronic density.
 These derivative identities refer to the residual model. In `offline` mode,
 separately supplied baseline values are added to each output; their physical
 consistency cannot be established by differentiating the supplied scalar energy
@@ -275,7 +279,8 @@ baseline arrays need not satisfy F_MM=-q_MM*GESP. The CM preparation script
 produces residual-only labels and requires the original baseline provenance.
 
 The implementation is in `mlpui/models/tensornet_qmmm/model.py`; numeric tests
-are in `tests/test_qmmm_gesp.py`. Tests check full-energy coordinate/charge
+are in `tests/test_qmmm_gesp.py` and `tests/test_tensornet_ext.py`. Tests check
+full-energy coordinate/charge
 finite differences, unchanged E/F/ESP when GESP is requested, frozen-response
 probe finite differences, an explicit counterexample to the total mixed
 derivative, zero/small MM charges, O(3) transformations, each target's parameter
@@ -294,7 +299,8 @@ instead pools scalar components and reports its component count. Initial
 four-target weights should be inverse squared train-only RMS scales,
 computed with the same per-frame convention and recorded with their units.
 Validation selects stopping; test/guard frames must not set scales or be
-attached to the training job. Existing E/F configurations remain valid.
+attached to the training job. Schema-2 E/F target selections remain valid;
+schema-1 model configurations must be replaced.
 
 `python -m scripts.prepare_cm_fourtarget --help` documents the CM importer.
 Its inputs are the original mm10A/npys directory, verified ESP npys directory,
