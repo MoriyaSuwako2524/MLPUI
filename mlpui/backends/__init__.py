@@ -4,6 +4,7 @@ from .newtonnet import NewtonNetBackend
 from .torchmdnet import TorchMDNetBackend
 from .mace import MACEBackend
 from .tensornet_qmmm import TensorNetQMMMBackend
+from .tensornet_legacy import TensorNetLegacyBackend
 
 
 _backends = {}
@@ -42,3 +43,5 @@ register_backend(NewtonNetBackend())
 register_backend(TorchMDNetBackend())
 register_backend(MACEBackend())
 register_backend(TensorNetQMMMBackend())
+
+register_backend(TensorNetLegacyBackend())

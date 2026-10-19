@@ -122,13 +122,15 @@ test('GESP selection survives UI payload and requires its own labels',()=>{
 });
 
 
-test('switching to QMMM after selecting a managed dataset restores offline identity',()=>{
+for (const family of ['tensornet_qmmm', 'tensornet-ext']) {
+test(`switching to ${family} after selecting a managed dataset restores offline identity`,()=>{
   const ui=dashboard();
+  ui.context.familyFixture=family;
   ui.context.document.querySelectorAll=()=>[];
   vm.runInContext('init=()=>{};',ui.context);
   vm.runInContext(fs.readFileSync(path.join(__dirname,'../mlpui/web/static/datasets.js'),'utf8'),ui.context);
-  vm.runInContext("models={tensornet_qmmm:{baseline:{mode:'residual_only'}}}; backends={tensornet_qmmm:{training_targets:['energy','forces','mm_forces','mm_potential']}}; datasetRecords=[{id:'selected',spec:{directory:'data'},summary:{fields:['z','pos','mm_pos','mm_charges'],baseline_metadata:{mode:'offline',source_manifest_sha256:'identity'}}}];",ui.context);
-  ui.element('family').value='tensornet_qmmm';
+  vm.runInContext("models={[familyFixture]:{baseline:{mode:'residual_only'}}}; backends={[familyFixture]:{training_targets:['energy','forces','mm_forces','mm_potential']}}; datasetRecords=[{id:'selected',spec:{directory:'data'},summary:{fields:['z','pos','mm_pos','mm_charges'],baseline_metadata:{mode:'offline',source_manifest_sha256:'identity'}}}];",ui.context);
+  ui.element('family').value=family;
   ui.element('managed-train').value='selected';
   ui.element('task-type').value='training';
   ui.element('family').listeners.change();
@@ -137,3 +139,24 @@ test('switching to QMMM after selecting a managed dataset restores offline ident
   assert.equal(ui.element('directory').value,'data');
   assert.equal(ui.element('qmmm-baseline-label').hidden,false);
 });
+}
+
+for (const family of ['tensornet_qmmm', 'tensornet-ext']) {
+  test(`${family} exposes all four training weights without changing split or scales`, () => {
+    const ui=dashboard();
+    ui.context.structuredClone=structuredClone;
+    ui.context.document.querySelectorAll=()=>[];
+    ui.context.familyFixture=family;
+    vm.runInContext("let datasetRecords=[]; backends={[familyFixture]:{training_targets:['energy','forces','mm_potential','mm_potential_gradient']}};",ui.context);
+    for(const [key,value] of Object.entries({'family':family,'task-type':'training','model-config':'{}','qmmm-baseline-mode':'residual_only','energy-scale':'1','length-scale':'1','dtype':'float64','device':'cpu','epochs':'2','batch-size':'1','learning-rate':'0.001','seed':'42','save-interval':'1','max-checkpoints':'2','test-interval':'1'}))ui.element(key).value=value;
+    for(const key of ['z','pos','mm_pos','mm_charges','mm_offsets','energy','forces','mm_potential','mm_potential_gradient'])ui.element('file-'+key).value=key+'.npy';
+    for(const [i,key] of ['energy','forces','mm_potential','mm_potential_gradient'].entries())ui.element('weight-'+key).value=String(i+1);
+    vm.runInContext('updateBackendTargets(); result=payload();',ui.context);
+    assert.equal(ui.element('qmmm-settings').hidden,false);
+    assert.deepEqual(JSON.parse(JSON.stringify(ui.context.result.training.loss_weights)),{energy:1,forces:2,mm_potential:3,mm_potential_gradient:4});
+    assert.equal(ui.context.result.family,family);
+    assert.equal(ui.context.result.train.files.mm_potential_gradient,'mm_potential_gradient.npy');
+    assert.equal(ui.context.result.train.energy_scale,1);
+    assert.equal(ui.context.result.train.length_scale,1);
+  });
+}

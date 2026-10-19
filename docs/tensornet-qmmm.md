@@ -4,6 +4,7 @@ Schema 2 (`architecture: tensornet_ext_v1`) replaces the original H+3 head.
 It follows [panxl/torchmd-net at b0f7c7b](https://github.com/panxl/torchmd-net/tree/b0f7c7b42c6304c016a9e3dee78d4e2f4cbadc7d).
 Legacy schema-1 checkpoints are rejected with an architecture-incompatibility
 error, including direct non-strict state loading. Existing files are not changed.
+The historical model is separately available as [`tensornet-ext`](tensornet-legacy-comparison.md); it does not change this schema2 implementation.
 This is a finite, nonperiodic residual adaptation; there is no QM/MM-AC or MD adapter.
 
 ## Energy and baseline semantics

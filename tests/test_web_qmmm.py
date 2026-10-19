@@ -26,9 +26,10 @@ def arrays():
         source_index=np.arange(200,206), short_contact=np.array([0,1,0,0,1,0]))
 
 
+@pytest.mark.parametrize('family', ['tensornet_qmmm', 'tensornet-ext'])
 @pytest.mark.parametrize('offline', [False, True])
 @pytest.mark.parametrize('gesp', [False, True])
-def test_http_qmmm_end_to_end(tmp_path, offline, gesp):
+def test_http_qmmm_end_to_end(tmp_path, offline, gesp, family):
     server=make_server(tmp_path/'runs',0)
     threading.Thread(target=server.serve_forever,daemon=True).start()
     base=f'http://127.0.0.1:{server.server_port}'
@@ -40,8 +41,12 @@ def test_http_qmmm_end_to_end(tmp_path, offline, gesp):
             return response.read()
     try:
         c=offline_config() if offline else config()
-        assert c['architecture']=='tensornet_ext_v1' and c['schema_version']==2
-        c['ext_cutoff_upper']=7.5
+        if family == 'tensornet-ext':
+            from test_tensornet_legacy import config as legacy_config
+            c = {**legacy_config(), 'baseline': c['baseline']}
+        else:
+            assert c['architecture']=='tensornet_ext_v1' and c['schema_version']==2
+            c['ext_cutoff_upper']=7.5
         values=arrays()
         props=('energy','forces','mm_forces','mm_potential')
         if gesp:
@@ -75,7 +80,7 @@ def test_http_qmmm_end_to_end(tmp_path, offline, gesp):
                     if key=='baseline_metadata': assert part[row][key]==value
                     else: np.testing.assert_array_equal(part[row][key],value)
             start+=len(part)
-        payload=dict(name='Synthetic QMMM',family='tensornet_qmmm',model_config=c,
+        payload=dict(name='Synthetic QMMM',family=family,model_config=c,
             training=dict(epochs=1,dtype='float64',loss_weights={p:1. for p in props}),**specs)
         assert post('/api/preview',payload)['train']['first_mm_points']==0
         # Missing selected targets must fail before any worker job is created.
@@ -94,9 +99,11 @@ def test_http_qmmm_end_to_end(tmp_path, offline, gesp):
         checkpoint=tmp_path/'downloaded.pt'
         checkpoint.write_bytes(download('/api/jobs/'+job['id']+'/model'))
         loaded=load_external_checkpoint(checkpoint,device='cpu',dtype=torch.float64).model
-        assert loaded.config['ext_cutoff_upper']==7.5
-        assert loaded.config['architecture']=='tensornet_ext_v1'
-        evaluation=dict(name='Synthetic evaluation',family='tensornet_qmmm',model_config=c,
+        assert loaded.config['architecture']==c['architecture']
+        assert loaded.mlpui_family==family
+        if family == 'tensornet_qmmm':
+            assert loaded.config['ext_cutoff_upper']==7.5
+        evaluation=dict(name='Synthetic evaluation',family=family,model_config=c,
             training=payload['training'],task_type='evaluation',evaluation=specs['test'],checkpoint=str(checkpoint))
         job=post('/api/jobs',evaluation); state=wait_job(server.manager,job['id'])
         assert state['status']=='completed',state
@@ -126,5 +133,21 @@ def test_http_qmmm_end_to_end(tmp_path, offline, gesp):
         assert state['status']=='completed',state
         assert state['evaluation']['metrics']['mm_forces']==dict(count=0,mae=None,mse=None,rmse=None)
         assert 'mm_forces' not in state['evaluation']['plots']
+    finally:
+        server.shutdown(); server.manager.close(); server.server_close(); server.lease.close()
+
+
+def test_http_comparison_presets(tmp_path):
+    server=make_server(tmp_path/'runs',0)
+    threading.Thread(target=server.serve_forever,daemon=True).start()
+    try:
+        with urlopen(f'http://127.0.0.1:{server.server_port}/api/presets') as response:
+            result=json.load(response)
+        for family,architecture in [('tensornet_qmmm','tensornet_ext_v1'),('tensornet-ext','tensornet_qm_h3_v1')]:
+            assert result['models'][family]['architecture']==architecture
+            assert result['backends'][family]['architecture']==architecture
+            assert 'H+3' in result['backends'][family]['config_hint']
+            assert {'energy','forces','mm_potential','mm_potential_gradient'}<=set(result['backends'][family]['training_targets'])
+        assert server.manager.list()==[]
     finally:
         server.shutdown(); server.manager.close(); server.server_close(); server.lease.close()

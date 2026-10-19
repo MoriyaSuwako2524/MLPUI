@@ -155,7 +155,7 @@ def save_evaluation_artifacts(observations, data, directory, *, metadata=None):
         has_mm = "mm_pos" in _parts(data)[0].arrays
         mm_counts = np.asarray([len(data[i].get("mm_pos", [])) for i in range(len(data))], dtype=np.int64)
         variable_mm = bool(len(np.unique(mm_counts)) > 1)
-        qmmm = (metadata or {}).get("model_family") == "tensornet_qmmm"
+        qmmm = (metadata or {}).get("model_family") in ("tensornet_qmmm", "tensornet-ext")
         units = {"energy": "eV", "forces": "eV/angstrom", "mm_forces": "eV/angstrom", "mm_potential": "eV/e", "mm_potential_gradient": "eV/(e*angstrom)"}
         files, properties = {}, {}
         for prop, pairs in observations.items():

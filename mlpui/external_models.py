@@ -86,6 +86,17 @@ def load_external_checkpoint(path, *, family=None, model_config=None, device=Non
                 raise ValueError("Versioned checkpoint requires backend metadata")
         if "backend" in checkpoint:
             saved_backend = get_backend(checkpoint["backend"])
+            # Explicit migration only: historical checkpoints called the H+3 model
+            # tensornet_qmmm. Never reinterpret schema2 or migrate on auto-load.
+            if family == 'tensornet-ext' and saved_backend.name == 'tensornet_qmmm':
+                legacy_state = checkpoint.get('state_dict', checkpoint.get('model_state_dict', {}))
+                legacy_config = checkpoint.get('model_config', {})
+                schema = _strip_prefix(legacy_state).get('qmmm_schema') if isinstance(legacy_state, Mapping) else None
+                if (isinstance(legacy_config, Mapping)
+                        and isinstance(schema, torch.Tensor) and schema.numel() == 1 and schema.item() == 1
+                        and legacy_config.get('schema_version') == 1
+                        and legacy_config.get('architecture', 'tensornet_qm_h3_v1') == 'tensornet_qm_h3_v1'):
+                    saved_backend = get_backend('tensornet-ext')
             if family is not None and family != saved_backend.name:
                 raise ValueError(f"Checkpoint is {saved_backend.name}, not requested family {family}")
             family = saved_backend.name
@@ -101,6 +112,8 @@ def load_external_checkpoint(path, *, family=None, model_config=None, device=Non
     config = _config_dict(model_config if model_config is not None else config)
     detected = detect_family(state, config)
     if family is not None and detected is not None and family != detected:
+        if family == 'tensornet_qmmm' and detected == 'tensornet-ext':
+            raise ValueError('Incompatible QMMM architecture: schema1 H+3 weights require explicit tensornet-ext selection')
         raise ValueError(f"Checkpoint is {detected}, not requested family {family}")
     family = family or detected
     if family is None:

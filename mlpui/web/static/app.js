@@ -45,7 +45,7 @@ function payload() {
   const files={};
   for(const key of ['z','pos','energy','forces','charges','cell','pbc','offsets','mm_pos','mm_charges','mm_offsets','mm_forces','mm_potential','mm_potential_gradient','baseline_energy','baseline_forces','baseline_mm_forces','baseline_mm_potential','baseline_mm_potential_gradient','frame_index','source_index','short_contact']) {
     if(['energy','forces','charges','mm_forces','mm_potential','mm_potential_gradient'].includes(key) && !(key in weights)) continue;
-    if(key.startsWith('mm_')||key.startsWith('baseline_')) {if(text('family')!=='tensornet_qmmm') continue;}
+    if(key.startsWith('mm_')||key.startsWith('baseline_')) {if(!['tensornet_qmmm','tensornet-ext'].includes(text('family'))) continue;}
     if(text('file-'+key)) files[key]=text('file-'+key);
   }
   for(const key of Object.keys(weights)) if(selected?!selected.summary.fields.includes(key):!files[key]) throw new Error('Dataset is missing '+key+' labels');
@@ -55,7 +55,7 @@ function payload() {
   try { model=JSON.parse($('model-config').value); } catch { throw new Error('Model configuration is not valid JSON'); }
   const container=backends[text('family')]?.config_container;
   const modelSettings=container&&model[container]&&typeof model[container]==='object'?model[container]:model;
-  if(text('family')==='tensornet_qmmm') {
+  if(['tensornet_qmmm','tensornet-ext'].includes(text('family'))) {
     if(text('qmmm-baseline-mode')==='offline') {
       try {modelSettings.baseline=JSON.parse(text('qmmm-baseline-metadata'));} catch {throw new Error('Enter valid offline baseline identity JSON');}
       if(modelSettings.baseline.mode!=='offline') throw new Error('Baseline metadata must declare offline mode');
@@ -221,7 +221,7 @@ async function refresh() {
 }
 $('family').addEventListener('change',()=>{$('model-config').value=JSON.stringify(models[text('family')],null,2);syncQMMMConfig();updateBackendTargets();if(typeof setManagedFields==='function')setManagedFields();});
 function updateBackendTargets() {
-  const qmmm=text('family')==='tensornet_qmmm';
+  const qmmm=['tensornet_qmmm','tensornet-ext'].includes(text('family'));
   $('qmmm-settings').hidden=!qmmm;
   for(const node of document.querySelectorAll('.qmmm-field')) node.hidden=!qmmm;
   $('qmmm-baseline-label').hidden=!qmmm||text('qmmm-baseline-mode')!=='offline';
@@ -242,7 +242,7 @@ function updateBackendTargets() {
   if(!targets.includes('charges')) $('charge-constraint').checked=false;
 }
 function syncQMMMConfig() {
-  if(text('family')!=='tensornet_qmmm') return;
+  if(!['tensornet_qmmm','tensornet-ext'].includes(text('family'))) return;
   try {
     const baseline=JSON.parse(text('model-config')).baseline||{mode:'residual_only'};
     $('qmmm-baseline-mode').value=baseline.mode;

@@ -1,0 +1,32 @@
+# Historical QM-only TensorNet + H+3 head (not upstream panxl TensorNet-ext). Labels MUST be residuals after consistent
+# baseline subtraction. See docs/tensornet-qmmm.md for total-energy offline mode.
+family: tensornet-ext
+model_config:
+  schema_version: 1
+  architecture: tensornet_qm_h3_v1
+  precision: 64
+  embedding_dimension: 128
+  num_layers: 2
+  num_rbf: 32
+  max_num_neighbors: 64
+  cutoff_upper: 4.5
+  environment_cutoff: 10.0
+  environment_mode: fixed_reference_selection
+  potential_scale: 1.0
+  field_scale: 1.0
+  units: {length: angstrom, energy: eV, charge: e}
+  baseline: {mode: residual_only}
+training:
+  epochs: 10
+  batch_size: 1
+  learning_rate: 0.001
+  dtype: float64
+  device: cpu
+  loss_weights: {energy: 1.0, forces: 1.0, mm_potential: 1.0, mm_potential_gradient: 1.0}
+  # Optional additional label: mm_forces: 1.0
+train:
+  directory: ../data/qmmm_residual_train
+  gradients: false
+  energy_scale: 1.0
+  length_scale: 1.0
+output_dir: ../runs/tensornet_ext

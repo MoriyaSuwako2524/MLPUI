@@ -134,7 +134,7 @@ def inspect_data(settings):
         if missing:
             raise ValueError(f"{key} missing labels: {', '.join(sorted(missing))}")
         parts = data.datasets if isinstance(data, NpyShards) else [data]
-        if settings["family"] == "tensornet_qmmm":
+        if settings["family"] in ("tensornet_qmmm", "tensornet-ext"):
             from types import SimpleNamespace
             import torch
             backend = get_backend(settings["family"])
@@ -154,7 +154,7 @@ def inspect_data(settings):
             _validated_sidecars(data)
             if settings.get("checkpoint"):
                 from mlpui.external_models import load_external_checkpoint
-                load_external_checkpoint(settings["checkpoint"], family="tensornet_qmmm",
+                load_external_checkpoint(settings["checkpoint"], family=settings["family"],
                                          model_config=config, device="cpu")
         result[key] = {"samples": len(data), "groups": len(parts),
                        "fields": sorted(fields), "first_atoms": len(data[0]["z"]),

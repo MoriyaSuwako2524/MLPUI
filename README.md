@@ -554,3 +554,5 @@ required. UMA uses the complete bundled predictor without a FAIR-Chem runtime.
 The supported target is UMA-s-1p2 / omol / nonperiodic molecules.
 See [setup, inputs and output units](docs/uma-prediction.md).
 The WebUI, errors and project documentation are in English.
+
+The independent [`tensornet-ext` comparison option](docs/tensornet-legacy-comparison.md) restores the historical QM-only TensorNet + H+3 head. Current `tensornet_qmmm` remains the schema2 radial-MM architecture.

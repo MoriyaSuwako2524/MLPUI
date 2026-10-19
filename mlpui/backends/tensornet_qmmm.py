@@ -14,6 +14,10 @@ class TensorNetQMMMBackend(ModelBackend):
     supports_evaluation_artifacts = True
     training_targets = ('energy', 'forces', 'mm_forces', 'mm_potential', 'mm_potential_gradient')
 
+    def metadata(self):
+        return {**super().metadata(), 'architecture': 'tensornet_ext_v1',
+                'config_hint': 'Current schema2 TensorNet-QMMM: upstream panxl TensorNet-ext-derived radial MM tensor messages inside interactions. For the historical QM-only H+3 comparison select tensornet-ext.'}
+
     def default_config(self):
         return dict(schema_version=2, architecture='tensornet_ext_v1', precision=32, embedding_dimension=128, num_layers=2,
             num_rbf=32, max_num_neighbors=64, cutoff_upper=4.5, environment_cutoff=10.,
@@ -94,7 +98,8 @@ class TensorNetQMMMBackend(ModelBackend):
     def matches(self, state):
         if isinstance(state, torch.nn.Module):
             return type(state).__module__ == 'mlpui.models.tensornet_qmmm.model'
-        return 'qmmm_schema' in state
+        schema = state.get('qmmm_schema')
+        return 'qmmm_schema' in state and not (isinstance(schema, torch.Tensor) and schema.numel() == 1 and schema.item() == 1)
 
     def build_model(self, config):
         from mlpui.models.tensornet_qmmm.model import TensorNetQMMM

@@ -22,7 +22,7 @@ function setManagedFields(){
     $('directory').value=spec.directory; $('layout').value='custom'; $('shards').value=(spec.shards||[]).join(', ');
     $('gradients').checked=!!spec.gradients;
     $('energy-scale').value=spec.energy_scale??1; $('length-scale').value=spec.length_scale??1;
-    if(text('family')==='tensornet_qmmm') {
+    if(['tensornet_qmmm','tensornet-ext'].includes(text('family'))) {
       const baseline=selected.summary.baseline_metadata;
       $('qmmm-baseline-mode').value=baseline?'offline':'residual_only';
       $('qmmm-baseline-metadata').value=baseline?JSON.stringify(baseline,null,2):'';

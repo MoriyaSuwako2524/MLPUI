@@ -84,3 +84,11 @@ The QM embedding uses the existing vendored TensorNet implementation.
 Tests retain the unmodified upstream file in `tests/fixtures/` with its license
 and execute definitions only, without upstream global precision settings.
 See `docs/tensornet-qmmm.md` for ragged-edge and zero-charge derivative adaptations.
+
+## Historical comparison option (tensornet-ext)
+
+`mlpui/models/tensornet_legacy/model.py` restores MLPUI's QM-only TensorNet +
+H+3 invariant head from `f7536676e02e1a64d1f0c9be9042e27b24d836db`. It uses the
+existing bundled TorchMD-Net TensorNet and is distinct from the panxl radial-MM
+implementation above. The exact historical MLPUI source is retained at
+`tests/fixtures/qmmm_schema1_f753667.py` for four-target numerical regression.
