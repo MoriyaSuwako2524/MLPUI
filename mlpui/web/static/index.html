@@ -130,7 +130,7 @@
         <label>Epochs<input id="epochs" type="number" value="10" min="1" step="1" required></label>
         <label class="check"><input id="early-stopping" type="checkbox">Enable early stopping<small>Uses validation metrics; requires a separate validation set.</small></label>
         <label>Early-stopping metric<select id="early-monitor"><option value="loss">Weighted validation loss</option><option value="energy">Validation set Energy MSE</option><option value="forces">Validation set Forces MSE</option><option value="charges">Validation set Charges MSE</option><option value="mm_forces">MM force MSE</option><option value="mm_potential">MM potential MSE</option><option value="mm_potential_gradient">Fixed-response GESP MSE</option></select></label>
-        <label>Patience<input id="early-patience" type="number" value="10" min="1" step="1"><small>Stop after N consecutive epochs without sufficient improvement.</small></label>
+        <label>Patience<input id="early-patience" type="number" value="10" min="1" step="1"><small>Stop after N consecutive validation checks without sufficient improvement.</small></label>
         <label>Minimum improvement (min delta)<input id="early-min-delta" type="number" value="0" min="0" step="any"><small>Absolute decrease; equality is not improvement. best.pt saves the lowest metric; model.pt saves the final weights.</small></label>
         <label>Batch size<input id="batch-size" type="number" value="4" min="1" step="1" required></label>
         <label>Learning rate<input id="learning-rate" type="number" value="0.001" min="0.000000000001" step="any" required></label>
@@ -142,6 +142,7 @@
         <label>Save interval N (epochs)<input id="save-interval" type="number" value="10" min="0" step="1" required><small>0 disables periodic checkpoints.</small></label>
         <label>Maximum retained checkpoints<input id="max-checkpoints" type="number" value="3" min="1" step="1" required><small>Keeps the newest files; excludes the final model.pt.</small></label>
         <label>Test interval M (epochs)<input id="test-interval" type="number" value="1" min="1" step="1" required><small>With test data, evaluates every M epochs.</small></label>
+        <label>Validation interval N (epochs)<input id="validation-interval" type="number" value="1" min="1" step="1" required><small>Validates every N epochs and after the last epoch; early-stopping patience counts validations.</small></label>
       </div><p id="training-hint" class="hint">Set energy or force weights to 0 to disable them. Enable charges with the checkbox. Gradients accumulate across structures in each batch.</p></div>
       </div><div class="form-side"><div class="panel summary"><div class="eyebrow">READY WHEN YOU ARE</div><h2>Start an experiment</h2><p>Data settings, parameters and logs are saved in a separate job directory.</p><ul><li>Train models or evaluate existing checkpoints</li><li>Live progress, metrics and logs</li><li>Separate outputs for each job</li></ul><button class="primary" id="start" type="submit">Start training <span>→</span></button><small>Jobs run in the background queue as GPUs become available. Closing the browser does not stop the queue.</small></div></div></div>
     </form>

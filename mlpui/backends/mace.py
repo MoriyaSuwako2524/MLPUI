@@ -14,6 +14,7 @@ class MACEBackend(ModelBackend):
     name = "mace"
     label = "MACE"
     training_targets = ("energy", "forces", "charges", "stress")
+    supports_batching = True
 
     def metadata(self):
         return {**super().metadata(), "config_hint":
@@ -152,6 +153,28 @@ class MACEBackend(ModelBackend):
         )
         q = None if charge is None else torch.tensor([charge], dtype=dtype, device=device)
         return dict(data=graph, q=q)
+
+    def prepare_batch(self, samples, device, dtype, *, model=None):
+        parts = [self.prepare_sample(sample, device, dtype, model=model) for sample in samples]
+        if len({part["q"] is None for part in parts}) != 1:
+            return None
+        graphs = [part["data"] for part in parts]
+        counts = [int(g["positions"].shape[0]) for g in graphs]
+        starts = np.concatenate(([0], np.cumsum(counts)))
+        graph = dict(
+            positions=torch.cat([g["positions"].detach() for g in graphs]),
+            node_attrs=torch.cat([g["node_attrs"] for g in graphs]),
+            batch=torch.repeat_interleave(torch.arange(len(graphs), device=device),
+                                          torch.tensor(counts, device=device)),
+            ptr=torch.tensor(starts, dtype=torch.long, device=device),
+            edge_index=torch.cat([g["edge_index"] + int(start) for g, start in zip(graphs, starts)], dim=1),
+            shifts=torch.cat([g["shifts"] for g in graphs]),
+            unit_shifts=torch.cat([g["unit_shifts"] for g in graphs]),
+            cell=torch.cat([g["cell"] for g in graphs]),
+            head=torch.zeros(len(graphs), dtype=torch.long, device=device),
+        )
+        q = None if parts[0]["q"] is None else torch.cat([part["q"] for part in parts])
+        return dict(data=graph, q=q), {"atoms": counts}
 
     def forward(self, model, inputs, properties):
         # Evaluation of derivative properties also needs coordinate autograd.

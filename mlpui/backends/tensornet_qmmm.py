@@ -13,6 +13,7 @@ class TensorNetQMMMBackend(ModelBackend):
     web_supported = True
     supports_evaluation_artifacts = True
     training_targets = ('energy', 'forces', 'mm_forces', 'mm_potential', 'mm_potential_gradient')
+    supports_batching = True
 
     def metadata(self):
         return {**super().metadata(), 'architecture': 'tensornet_ext_v1',
@@ -190,6 +191,43 @@ class TensorNetQMMMBackend(ModelBackend):
                 raise ValueError('Dataset baseline_metadata must exactly match checkpoint provenance')
         inputs['baseline'] = baseline
         return inputs
+
+    def prepare_batch(self, samples, device, dtype, *, model=None):
+        """Concatenate QM and MM regions with explicit batch IDs and MM offsets.
+
+        Validation (shapes, charges, spin, baseline provenance) is delegated to
+        prepare_sample on the merged structure, exactly as for a single sample.
+        """
+        if any('batch' in s or 'mm_batch' in s or 'mm_offsets' in s for s in samples):
+            return None
+        array = lambda s, k: np.asarray(s[k])
+        atoms = [len(array(s, 'z')) for s in samples]
+        mm = [len(array(s, 'mm_pos')) if 'mm_pos' in s else 0 for s in samples]
+        merged = {
+            'z': np.concatenate([array(s, 'z') for s in samples]),
+            'pos': np.concatenate([array(s, 'pos').reshape(-1, 3) for s in samples]),
+            'mm_pos': np.concatenate([array(s, 'mm_pos').reshape(-1, 3) for s in samples]),
+            'mm_charges': np.concatenate([array(s, 'mm_charges').reshape(-1) for s in samples]),
+            'batch': np.repeat(np.arange(len(samples)), atoms),
+            'mm_offsets': np.concatenate(([0], np.cumsum(mm))).astype(np.int64),
+            'charge': np.array([float(np.asarray(s.get('charge', 0)).reshape(-1)[0]) for s in samples]),
+            'spin': np.array([float(np.asarray(s.get('spin', 0)).reshape(-1)[0]) for s in samples]),
+        }
+        if any(np.any(s.get('pbc', False)) for s in samples):
+            merged['pbc'] = True
+        keys = {k for s in samples for k in s if k.startswith('baseline_') and k != 'baseline_metadata'}
+        for key in keys:
+            if not all(key in s for s in samples):
+                return None
+            parts = [np.asarray(s[key]) for s in samples]
+            merged[key] = (np.array([p.reshape(-1)[0] for p in parts]) if key == 'baseline_energy'
+                           else np.concatenate([p.reshape((-1,) + p.shape[1:]) if p.ndim else p.reshape(-1) for p in parts]))
+        metadata = [s.get('baseline_metadata') for s in samples]
+        if any(m != metadata[0] for m in metadata):
+            raise ValueError('All samples in a batch must share baseline_metadata')
+        if metadata[0] is not None:
+            merged['baseline_metadata'] = metadata[0]
+        return self.prepare_sample(merged, device, dtype, model=model), {'atoms': atoms, 'mm': mm}
 
     def forward(self, model, inputs, properties):
         if set(properties) - set(self.training_targets):

@@ -260,8 +260,10 @@ files are removed only after the new file is saved successfully.
 An optional, separate **test** dataset can be evaluated every `test_interval=M`
 epochs (default 1). Test evaluation runs at M, 2M, 3M, ... without updating model
 weights, and reports per-property MSE in the history, logs, and chart. An ending
-epoch that is not a multiple of M does not trigger an extra test. The existing
-validation dataset is still evaluated every epoch. Test fields use the same
+epoch that is not a multiple of M does not trigger an extra test. The validation
+dataset is evaluated every `validation_interval=N` epochs (default 1) and always
+after the final configured epoch; skipped epochs have no `validation` entry in
+the history. Test fields use the same
 file mapping/units as training in the UI; Python/YAML can specify their own.
 
 Each task is stored under `runs/web/<id>/` with `config.json`, `status.json`,
@@ -458,10 +460,15 @@ resulting training units. Stress uses ASE's sign convention. Mixed PBC and
 NewtonNet triclinic periodic cells are rejected.
 
 Each loss is a component-mean squared error, averaged equally over structures,
-then weighted by `TrainingConfig.loss_weights`. A batch accumulates gradients
-from sequential structure forwards before one optimizer step; this supports
-different cells and atom counts, but is slower than a fused graph batch.
-Validation retains autograd for force heads without updating parameters.
+then weighted by `TrainingConfig.loss_weights`. With `batched=True` (default),
+NewtonNet, TorchMD-Net, MACE, TensorNet-QMMM and tensornet-ext run a batch as
+one concatenated graph (ragged atom/MM counts and zero-MM frames included); the
+per-structure losses are views of that single forward pass, so the loss and
+gradient equal the sequential per-structure accumulation (`batched=False`, or
+batches a backend declines, e.g. periodic TorchMD-Net cells). Peak memory grows
+with `batch_size`. Validation/evaluation use `eval_batch_size` structures per
+pass (default: `batch_size`) and retain autograd for force heads without
+updating parameters.
 `fit` returns per-property train/validation MSE for each epoch. `model.pt`
 contains model weights, architecture settings, and history, and loads through
 `CalculatorBuilder.from_checkpoint`. It is an inference/fine-tuning export,
@@ -474,12 +481,13 @@ Hessian/BEC heads or implement early stopping/distributed training.
 To enable periodic saves and independent test evaluation in Python:
 
 ```python
-config = TrainingConfig(save_interval=10, max_checkpoints=3, test_interval=5)
+config = TrainingConfig(save_interval=10, max_checkpoints=3, test_interval=5,
+                        batch_size=8, validation_interval=5, eval_batch_size=16)
 trainer = Trainer("newtonnet", model_config, config)
 history = trainer.fit(train, valid, test_data=test, output_dir="runs/experiment")
 ```
 
-In YAML, put these three settings under `training` and add a `test` dataset
+In YAML, put these settings under `training` and add a `test` dataset
 section with the same schema as `train`/`validation`. Periodic saving requires
 an `output_dir` in the Python API. Use disjoint structures for all three splits;
 the WebUI rejects overlapping coordinate file paths between splits.
@@ -518,7 +526,9 @@ retention does not remove best.pt. Early stopping is off by default.
 
 Python/YAML configuration uses `early_stopping`, `early_stopping_monitor`,
 `early_stopping_patience`, and `early_stopping_min_delta` in `TrainingConfig` / the
-`training` object. `fit` requires both validation data and `output_dir` when enabled.
+`training` object. With `validation_interval=N`, patience counts validation
+checks (patience P stops after P*N epochs without improvement), and `best.pt`
+can only come from validated epochs. `fit` requires both validation data and `output_dir` when enabled.
 Fine-tuning from a checkpoint starts a new early-stopping history; optimizer and
 patience state are not resumed.
 

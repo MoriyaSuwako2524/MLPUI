@@ -45,10 +45,24 @@ class TrainingConfig:
     early_stopping_monitor: str = "loss"
     early_stopping_patience: int = 10
     early_stopping_min_delta: float = 0.0
+    # Validate every N epochs (and always after the final configured epoch).
+    # Early-stopping patience counts validation checks, not epochs.
+    validation_interval: int = 1
+    # Structures per forward pass during validation/evaluation; None reuses batch_size.
+    eval_batch_size: int | None = None
+    # Concatenate a batch into one graph for backends that support it. False keeps
+    # the per-structure gradient accumulation path (identical loss definition).
+    batched: bool = True
 
     def __post_init__(self):
         if not isinstance(self.early_stopping, bool):
             raise ValueError("early_stopping must be boolean")
+        if not isinstance(self.batched, bool):
+            raise ValueError("batched must be boolean")
+        if self.eval_batch_size is not None and (
+                isinstance(self.eval_batch_size, bool) or not isinstance(self.eval_batch_size, int)
+                or self.eval_batch_size < 1):
+            raise ValueError("eval_batch_size must be a positive integer or null")
         if (isinstance(self.early_stopping_patience, bool) or not isinstance(self.early_stopping_patience, int)
                 or self.early_stopping_patience < 1):
             raise ValueError("early_stopping_patience must be a positive integer")
@@ -66,7 +80,8 @@ class TrainingConfig:
             raise ValueError("loss_weights requires supported targets with finite positive weights")
         if self.dtype not in (torch.float32, torch.float64):
             raise ValueError("Training supports float32 and float64")
-        for name, minimum in (("save_interval", 0), ("max_checkpoints", 1), ("test_interval", 1)):
+        for name, minimum in (("save_interval", 0), ("max_checkpoints", 1), ("test_interval", 1),
+                              ("validation_interval", 1)):
             value = getattr(self, name)
             if not isinstance(value, int) or isinstance(value, bool) or value < minimum:
                 raise ValueError(f"{name} must be an integer >= {minimum}")
@@ -75,10 +90,17 @@ class TrainingConfig:
 class Trainer:
     """Create a fresh model or fine-tune a checkpoint, using only .npy datasets.
 
-    Batches accumulate per-structure gradients to support differing atom counts
-    and cells on both backends. Loss is component-mean MSE, averaged over
-    structures, then summed with the configured property weights.
+    Loss is component-mean MSE within each structure, averaged over the
+    structures of a batch, then summed with the configured property weights.
+    Backends with ``supports_batching`` evaluate a batch as one concatenated
+    graph (``TrainingConfig.batched``); others, or batches a backend declines
+    (for example mixed periodic cells), accumulate per-structure gradients.
+    Both paths define the same loss and gradient.
     """
+
+    PER_STRUCTURE_TARGETS = ("energy", "dipole", "stress")
+    ATOMIC_TARGETS = ("forces", "charges")
+    MM_TARGETS = ("mm_forces", "mm_potential", "mm_potential_gradient")
 
     def __init__(self, family, model_config, config=None, *, checkpoint=None,
                  trusted_checkpoint=False):
@@ -102,13 +124,15 @@ class Trainer:
         self.optimizer = torch.optim.Adam(self.model.parameters(), lr=self.config.learning_rate)
         self.history = []
 
-    def _errors(self, sample, on_prediction=None):
+    def _check_sample(self, sample):
         missing = set(self.config.loss_weights) - sample.keys()
         if missing:
             raise ValueError(f"Sample missing enabled labels: {sorted(missing)}")
-        atoms = NpyDataset.atoms(sample)
-        if "stress" in self.config.loss_weights and not np.all(atoms.pbc):
+        if "stress" in self.config.loss_weights and not np.all(NpyDataset.atoms(sample).pbc):
             raise ValueError("Stress training requires periodic structures")
+
+    def _errors(self, sample, on_prediction=None):
+        self._check_sample(sample)
         inputs = self.backend.prepare_sample(
             sample, self.config.device, self.config.dtype, model=self.model)
         output = self.backend.forward(self.model, inputs, self.config.loss_weights)
@@ -128,13 +152,85 @@ class Trainer:
                               prediction.reshape(target.shape).detach().cpu().double().numpy())
         return errors
 
-    def _loss(self, sample):
+    def _batched_errors(self, samples, on_prediction=None):
+        """Per-structure error dicts for several samples from ONE forward pass.
+
+        Returns None when batching is disabled/unsupported for these samples;
+        callers then use the per-structure path. Error tensors are views of the
+        batched prediction, so per-structure losses keep their autograd graph.
+        """
+        if (not self.config.batched or len(samples) < 2
+                or not getattr(self.backend, "supports_batching", False)):
+            return None
+        for sample in samples:
+            self._check_sample(sample)
+        prepared = self.backend.prepare_batch(
+            samples, self.config.device, self.config.dtype, model=self.model)
+        if prepared is None:
+            return None
+        inputs, layout = prepared
+        output = self.backend.forward(self.model, inputs, self.config.loss_weights)
+        sizes = {"structure": [1] * len(samples), "atoms": list(layout["atoms"]),
+                 "mm": None if layout.get("mm") is None else list(layout["mm"])}
+        errors = [{} for _ in samples]
+        for prop in self.config.loss_weights:
+            prediction = output.get(prop)
+            if prediction is None:
+                raise ValueError(f"Model does not produce training target {prop}")
+            kind = ("structure" if prop in self.PER_STRUCTURE_TARGETS else
+                    "atoms" if prop in self.ATOMIC_TARGETS else
+                    "mm" if prop in self.MM_TARGETS else None)
+            if kind is None or sizes[kind] is None:
+                raise ValueError(f"Batched layout does not describe target {prop}")
+            counts = sizes[kind]
+            total = sum(counts)
+            if total == 0:
+                if prediction.numel():
+                    raise ValueError(f"Model output for {prop} is not empty for empty regions")
+                pieces = [prediction.reshape(-1)[:0]] * len(samples)
+            else:
+                if prediction.numel() % total:
+                    raise ValueError(f"Model output shape {tuple(prediction.shape)} does not match batched {prop}")
+                pieces = torch.split(prediction.reshape(total, -1), counts, dim=0)
+            for row, (sample, piece) in enumerate(zip(samples, pieces)):
+                target = torch.as_tensor(sample[prop], device=self.config.device, dtype=self.config.dtype)
+                if piece.numel() != target.numel():
+                    raise ValueError(f"Model output shape {tuple(piece.shape)} does not match {prop} target {tuple(target.shape)}")
+                error = piece.reshape(target.shape) - target
+                if not torch.isfinite(error).all():
+                    raise ValueError(f"Non-finite prediction or target for {prop}")
+                errors[row][prop] = (error, target, piece.reshape(target.shape))
+        if on_prediction is not None:
+            # Same callback order as the per-structure path: sample-major, then target.
+            for row in errors:
+                for prop, (_, target, prediction) in row.items():
+                    on_prediction(prop, target.detach().cpu().double().numpy(),
+                                  prediction.detach().cpu().double().numpy())
+        return [{prop: value[0] for prop, value in row.items()} for row in errors]
+
+    def _losses(self, errors):
         losses = {prop: (error.square().mean() if error.numel() else error.sum())
-                  for prop, error in self._errors(sample).items()}
+                  for prop, error in errors.items()}
         total = sum(self.config.loss_weights[k] * v for k, v in losses.items())
         if not torch.isfinite(total):
             raise ValueError("Non-finite training loss")
         return total, losses
+
+    def _loss(self, sample):
+        return self._losses(self._errors(sample))
+
+    def _chunk_errors(self, samples, on_prediction=None):
+        """Yield per-structure error dicts in sample order (batched when possible)."""
+        batched = self._batched_errors(samples, on_prediction)
+        if batched is not None:
+            return batched
+        if on_prediction is None:
+            return [self._errors(sample) for sample in samples]
+        return [self._errors(sample, on_prediction=on_prediction) for sample in samples]
+
+    @property
+    def _eval_batch_size(self):
+        return self.config.eval_batch_size or self.config.batch_size
 
     def evaluate(self, data, *, on_progress=None, should_stop=None, plot_dir=None,
                  artifact_dir=None, artifact_metadata=None):
@@ -153,20 +249,23 @@ class Trainer:
 
         def collect(key, reference, prediction):
             observations[key].append((reference, prediction))
-        for index, sample in enumerate(data):
+        size = self._eval_batch_size
+        for start in range(0, len(data), size):
             if should_stop is not None and should_stop():
                 raise TrainingStopped("Evaluation stopped by user")
+            samples = [data[index] for index in range(start, min(start + size, len(data)))]
             # Forces require differentiation with respect to positions.
             with torch.enable_grad():
-                errors = (self._errors(sample, on_prediction=collect)
-                          if observations is not None else self._errors(sample))
-            for key, error in errors.items():
-                error = error.detach().to(device="cpu", dtype=torch.float64)
-                totals[key]["count"] += error.numel()
-                totals[key]["absolute"] += error.abs().sum().item()
-                totals[key]["squared"] += error.square().sum().item()
+                chunk = self._chunk_errors(samples, on_prediction=collect if observations is not None else None)
+            for errors in chunk:
+                for key, error in errors.items():
+                    error = error.detach().to(device="cpu", dtype=torch.float64)
+                    totals[key]["count"] += error.numel()
+                    totals[key]["absolute"] += error.abs().sum().item()
+                    totals[key]["squared"] += error.square().sum().item()
+            del chunk
             if on_progress is not None:
-                on_progress({"phase": "evaluation", "completed": index + 1, "total": len(data)})
+                on_progress({"phase": "evaluation", "completed": start + len(samples), "total": len(data)})
         metrics = {}
         for key, total in totals.items():
             if total["count"] == 0:
@@ -233,13 +332,26 @@ class Trainer:
             for start in range(0, len(order), self.config.batch_size):
                 indices = order[start:start + self.config.batch_size]
                 self.optimizer.zero_grad(set_to_none=True)
-                for index in indices:
-                    check_stop()
+                check_stop()
+                samples = [train[int(index)] for index in indices]
+                with torch.enable_grad():
+                    batched = self._batched_errors(samples)
+                if batched is not None:
                     with torch.enable_grad():
-                        loss, parts = self._loss(train[int(index)])
-                        (loss / len(indices)).backward()
-                    for key, value in parts.items():
-                        sums[key] += value.detach().item()
+                        results = [self._losses(errors) for errors in batched]
+                        (sum(total for total, _ in results) / len(indices)).backward()
+                    for _, parts in results:
+                        for key, value in parts.items():
+                            sums[key] += value.detach().item()
+                    del batched, results
+                else:
+                    for sample in samples:
+                        check_stop()
+                        with torch.enable_grad():
+                            loss, parts = self._loss(sample)
+                            (loss / len(indices)).backward()
+                        for key, value in parts.items():
+                            sums[key] += value.detach().item()
                 if any(p.grad is not None and not torch.isfinite(p.grad).all() for p in self.model.parameters()):
                     raise ValueError("Non-finite parameter gradient")
                 self.optimizer.step()
@@ -248,7 +360,10 @@ class Trainer:
                                  "completed": min(start + len(indices), len(train)),
                                  "total": len(train), "history": self.history})
             row = {"epoch": len(self.history) + 1, "train": {k: v / len(train) for k, v in sums.items()}}
-            evaluations = [("validation", validation)]
+            evaluations = []
+            if (row["epoch"] % self.config.validation_interval == 0
+                    or row["epoch"] == self.config.epochs):
+                evaluations.append(("validation", validation))
             if row["epoch"] % self.config.test_interval == 0:
                 evaluations.append(("test", test))
             for split, evaluation in evaluations:
@@ -260,15 +375,21 @@ class Trainer:
                 self.model.eval()
                 sums = {key: 0.0 for key in self.config.loss_weights}
                 # Derivative heads still need autograd during validation.
+                size = self._eval_batch_size
                 with torch.enable_grad():
-                    for sample in evaluation:
+                    for start in range(0, len(evaluation), size):
                         check_stop()
-                        _, parts = self._loss(sample)
-                        for key, value in parts.items():
-                            sums[key] += value.detach().item()
+                        samples = [evaluation[index] for index in range(start, min(start + size, len(evaluation)))]
+                        batched = self._batched_errors(samples)
+                        results = ([self._losses(errors) for errors in batched] if batched is not None
+                                   else [self._loss(sample) for sample in samples])
+                        for _, parts in results:
+                            for key, value in parts.items():
+                                sums[key] += value.detach().item()
+                        del batched, results
                 row[split] = {k: v / len(evaluation) for k, v in sums.items()}
             self.history.append(row)
-            if self.early_stopping is not None:
+            if self.early_stopping is not None and "validation" in row:
                 early = self.early_stopping
                 values = row["validation"]
                 metric = (sum(self.config.loss_weights[k] * v for k, v in values.items())

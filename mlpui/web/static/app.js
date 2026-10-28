@@ -77,7 +77,7 @@ function payload() {
       training:{dtype:text('dtype'),device:text('device'),loss_weights:weights}};
   }
   const result={name:text('name'),family:text('family'),model_config:model,train,
-    training:{epochs:number('epochs'),batch_size:number('batch-size'),learning_rate:number('learning-rate'),dtype:text('dtype'),device:text('device'),seed:number('seed'),loss_weights:weights,save_interval:number('save-interval'),max_checkpoints:number('max-checkpoints'),test_interval:number('test-interval')}};
+    training:{epochs:number('epochs'),batch_size:number('batch-size'),learning_rate:number('learning-rate'),dtype:text('dtype'),device:text('device'),seed:number('seed'),loss_weights:weights,save_interval:number('save-interval'),max_checkpoints:number('max-checkpoints'),test_interval:number('test-interval'),validation_interval:number('validation-interval')}};
   if(text('training-mode')==='continue') {
     if(!text('checkpoint')) throw new Error('Continuation requires an existing .pt model path');
     result.checkpoint=text('checkpoint');
@@ -269,7 +269,7 @@ function updateTaskType() {
   $('split-hint').hidden=evaluating;
   $('training-hint').hidden=evaluating;
   $('start').textContent=evaluating?'Submit evaluation →':'Submit training →';
-  for(const id of ['epochs','batch-size','learning-rate','seed','weight-energy','weight-forces','train-charges','weight-charges','save-interval','max-checkpoints','test-interval','validation-shards','validation-directory','test-shards','test-directory']) {
+  for(const id of ['epochs','batch-size','learning-rate','seed','weight-energy','weight-forces','train-charges','weight-charges','save-interval','max-checkpoints','test-interval','validation-interval','validation-shards','validation-directory','test-shards','test-directory']) {
     $(id).closest('label').hidden=evaluating; $(id).disabled=evaluating;
   }
   for(const id of ['eval-energy','eval-forces','eval-charges']) $(id).closest('label').hidden=!evaluating;

@@ -11,6 +11,7 @@ class NewtonNetBackend(ModelBackend):
     label = "NewtonNet"
     config_container = "model"
     training_targets = ("energy", "forces", "charges", "dipole", "stress")
+    supports_batching = True
 
     def default_config(self):
         return dict(cutoff=5., n_features=64, n_basis=20, n_interactions=3,
@@ -69,6 +70,16 @@ class NewtonNetBackend(ModelBackend):
         if charge is not None:
             data["q"] = torch.tensor([charge], dtype=dtype, device=device)
         return data
+
+    def prepare_batch(self, samples, device, dtype, *, model=None):
+        parts = [self.prepare_sample(sample, device, dtype, model=model) for sample in samples]
+        if len({"q" in part for part in parts}) != 1:
+            return None
+        data, counts = self.concatenated_graph(parts, device)
+        data["cell"] = torch.cat([part["cell"] for part in parts])
+        if "q" in parts[0]:
+            data["q"] = torch.cat([part["q"] for part in parts])
+        return data, {"atoms": counts}
 
     def forward(self, model, inputs, properties):
         # Even an energy-only request may execute derivative heads.

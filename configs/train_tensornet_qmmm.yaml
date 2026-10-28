@@ -21,7 +21,8 @@ model_config:
   baseline: {mode: residual_only}
 training:
   epochs: 10
-  batch_size: 1
+  batch_size: 1  # >1 runs one concatenated QM/MM graph per batch
+  validation_interval: 1  # validate every N epochs (and after the last)
   learning_rate: 0.001
   dtype: float64
   device: cpu

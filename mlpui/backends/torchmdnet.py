@@ -13,6 +13,7 @@ class TorchMDNetBackend(ModelBackend):
     label = "TorchMD-Net / TensorNet"
     aliases = ("torchmd-net", "tensornet")
     training_targets = ("energy", "forces", "charges")
+    supports_batching = True
 
     def default_config(self):
         return dict(model="tensornet", precision=32, embedding_dimension=64,
@@ -106,6 +107,16 @@ class TorchMDNetBackend(ModelBackend):
         data["q"] = torch.tensor([charge if charge is not None else 0], dtype=dtype, device=device)
         data["s"] = torch.tensor([spin], dtype=dtype, device=device)
         return data
+
+    def prepare_batch(self, samples, device, dtype, *, model=None):
+        parts = [self.prepare_sample(sample, device, dtype, model=model) for sample in samples]
+        # The distance module takes one (3,3) box; periodic batches run per structure.
+        if any(part["box"] is not None for part in parts):
+            return None
+        data, counts = self.concatenated_graph(parts, device)
+        data.update(box=None, q=torch.cat([part["q"] for part in parts]),
+                    s=torch.cat([part["s"] for part in parts]))
+        return data, {"atoms": counts}
 
     def forward(self, model, inputs, properties):
         for module in model.modules():

@@ -43,6 +43,8 @@ class ModelBackend(ABC):
     web_supported = True
     supports_evaluation_artifacts = True
     training_targets = ("energy", "forces", "charges")
+    # True when prepare_batch() can merge several structures into one forward pass.
+    supports_batching = False
 
     def metadata(self):
         return dict(label=self.label, config_container=self.config_container,
@@ -102,6 +104,31 @@ class ModelBackend(ABC):
             charge=float(np.asarray(sample["charge"]).item()) if "charge" in sample else None,
             spin=float(sample.get("spin", 0)),
             require_charge=getattr(model, "charge_constraint", False))
+
+    def prepare_batch(self, samples, device, dtype, *, model=None):
+        """Merge structured samples into one forward-pass input.
+
+        Returns ``(inputs, layout)`` where ``layout["atoms"]`` lists QM atom
+        counts per structure and optional ``layout["mm"]`` lists MM point counts,
+        both in sample order. Outputs must be per-structure energies [B],
+        atom-concatenated atomic properties and MM-concatenated MM properties.
+        Return None to make the trainer fall back to per-structure execution.
+        """
+        return None
+
+    @staticmethod
+    def concatenated_graph(parts, device):
+        """Concatenate single-structure z/pos/batch inputs; returns (data, counts)."""
+        counts = [int(p["z"].numel()) for p in parts]
+        data = {
+            "z": torch.cat([p["z"] for p in parts]),
+            # Fresh leaf: models enable coordinate gradients on the merged tensor.
+            "pos": torch.cat([p["pos"].detach() for p in parts]),
+            "batch": torch.repeat_interleave(
+                torch.arange(len(parts), device=device),
+                torch.tensor(counts, device=device)),
+        }
+        return data, counts
 
     def geometry(self, atoms, device, dtype, length_to_angstrom, charge, require_charge):
         if require_charge and charge is None:
