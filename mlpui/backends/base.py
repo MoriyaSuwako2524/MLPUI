@@ -16,6 +16,8 @@ OUTPUT_ALIASES = {
     "mm_forces": ("mm_forces",),
     "mm_potential": ("mm_potential",),
     "mm_potential_gradient": ("mm_potential_gradient",),
+    "gas_mm_potential": ("gas_mm_potential",),
+    "gas_mm_potential_gradient": ("gas_mm_potential_gradient",),
 }
 
 

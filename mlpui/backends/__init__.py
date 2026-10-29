@@ -5,6 +5,7 @@ from .torchmdnet import TorchMDNetBackend
 from .mace import MACEBackend
 from .tensornet_qmmm import TensorNetQMMMBackend
 from .tensornet_legacy import TensorNetLegacyBackend
+from .qeq import QEqBackend
 
 
 _backends = {}
@@ -45,3 +46,4 @@ register_backend(MACEBackend())
 register_backend(TensorNetQMMMBackend())
 
 register_backend(TensorNetLegacyBackend())
+register_backend(QEqBackend())

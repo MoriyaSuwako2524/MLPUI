@@ -100,7 +100,7 @@ class Trainer:
 
     PER_STRUCTURE_TARGETS = ("energy", "dipole", "stress")
     ATOMIC_TARGETS = ("forces", "charges")
-    MM_TARGETS = ("mm_forces", "mm_potential", "mm_potential_gradient")
+    MM_TARGETS = ("mm_forces", "mm_potential", "mm_potential_gradient", "gas_mm_potential", "gas_mm_potential_gradient")
 
     def __init__(self, family, model_config, config=None, *, checkpoint=None,
                  trusted_checkpoint=False):

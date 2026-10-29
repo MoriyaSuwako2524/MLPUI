@@ -1,0 +1,34 @@
+# QEq charge electrostatics E_charge (variational charge equilibration). See docs/qeq-charge.md.
+# Dataset labels: energy = E_QMMM - E_gas, forces = F_QMMM - F_gas (environment part),
+# mm_potential / mm_potential_gradient = QM/MM labels, gas_mm_potential(_gradient) = gas-density ESP at the same MM sites.
+family: qeq_charge
+model_config:
+  schema_version: 1
+  architecture: qeq_tensornet_v1
+  precision: 64
+  embedding_dimension: 64
+  num_layers: 2
+  num_rbf: 32
+  max_num_neighbors: 64
+  cutoff_upper: 5.0
+  sigma_bounds: [0.3, 1.2]      # Gaussian charge width (angstrom), per element
+  hardness_bounds: [2.0, 40.0]  # J_i (eV/e^2), predicted per atom
+  units: {length: angstrom, energy: eV, charge: e}
+  baseline: {mode: residual_only}
+training:
+  epochs: 100
+  batch_size: 16
+  validation_interval: 5
+  learning_rate: 0.001
+  dtype: float64
+  device: cpu
+  # Weights ~ 1/(expected RMSE)^2 so that every target contributes comparably.
+  loss_weights: {energy: 10.0, forces: 4.0, mm_potential: 300.0, mm_potential_gradient: 100.0,
+                 gas_mm_potential: 300.0, gas_mm_potential_gradient: 100.0}
+  early_stopping: true
+  early_stopping_patience: 6
+train:
+  directory: ../data/qeq_train
+validation:
+  directory: ../data/qeq_validation
+output_dir: ../runs/qeq_charge
