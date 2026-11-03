@@ -108,12 +108,20 @@ class ASECalculatorTerm(PotentialTerm):
 
 
 def uma_term(checkpoint, *, charge, spin=1, task='omol', device='cpu', implementation='native',
-             name='uma', hash_checkpoint=True):
-    """UMA gas-phase term. implementation: 'native' (MLPUI predictor) or 'fairchem'."""
+             name='uma', hash_checkpoint=True, dtype=None):
+    """UMA gas-phase term. implementation: 'native' (MLPUI predictor) or 'fairchem'.
+
+    dtype ('float32'/'float64'/torch dtype) applies to the native predictor; None keeps
+    the checkpoint precision. FAIR-Chem manages its own precision.
+    """
+    if charge is None:
+        raise ValueError('uma_term needs the total QM charge')
     if implementation == 'native':
+        import torch
         from mlpui.calculator import CalculatorBuilder
+        torch_dtype = getattr(torch, dtype) if isinstance(dtype, str) else dtype
         calc = CalculatorBuilder.from_checkpoint(str(checkpoint), task=task, charge=charge, spin=spin,
-                                                 device=device).build()
+                                                 device=device, dtype=torch_dtype).build()
         fixed = dict(expected_charge=charge, expected_spin=spin)
     elif implementation == 'fairchem':
         from fairchem.core import FAIRChemCalculator, pretrained_mlip
