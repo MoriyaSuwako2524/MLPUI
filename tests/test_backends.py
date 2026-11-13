@@ -29,7 +29,7 @@ def test_registry_lazy_imports_and_aliases():
     result = subprocess.run([sys.executable, "-c", """
 import sys
 from mlpui.backends import registered_backends, get_backend
-assert {b.name for b in registered_backends()} == {'newtonnet', 'torchmdnet', 'mace', 'tensornet_qmmm', 'tensornet-ext', 'qeq_charge'}
+assert {b.name for b in registered_backends()} == {'newtonnet', 'torchmdnet', 'mace', 'tensornet_qmmm', 'tensornet-ext', 'qeq_charge', 'tensornet_transition'}
 assert get_backend('qeq') is get_backend('qeq_charge')
 assert get_backend('tensornet') is get_backend('torchmdnet')
 assert get_backend('torchmd-net') is get_backend('torchmdnet')

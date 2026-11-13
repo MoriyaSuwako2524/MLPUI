@@ -17,7 +17,9 @@ class NpyDataset(Dataset):
 
     targets = ("energy", "forces", "charges", "dipole", "stress", "mm_forces", "mm_potential", "mm_potential_gradient",
                # gas-phase (unpolarized) QM ESP and its gradient at the same MM sites
-               "gas_mm_potential", "gas_mm_potential_gradient")
+               "gas_mm_potential", "gas_mm_potential_gradient",
+               # excited-state 0->n transition properties, trailing state axis (sign per state is arbitrary)
+               "transition_charges", "transition_dipole")
     mm_fields = ("mm_pos", "mm_charges", "mm_offsets")
     baseline_fields = ("baseline_energy", "baseline_forces", "baseline_mm_forces", "baseline_mm_potential", "baseline_mm_potential_gradient")
 
@@ -88,6 +90,26 @@ class NpyDataset(Dataset):
         for name, allowed in shapes.items():
             if name in self.arrays and self.arrays[name].shape not in allowed:
                 raise ValueError(f"{name}.npy shape must be one of {allowed}")
+        states = {}
+        if "transition_charges" in self.arrays:
+            value = self.arrays["transition_charges"]
+            if value.shape == atomic_shape:
+                states["transition_charges"] = 1
+            elif value.shape[:-1] == atomic_shape and value.ndim == len(atomic_shape) + 1 and value.shape[-1] >= 1:
+                states["transition_charges"] = value.shape[-1]
+            else:
+                raise ValueError("transition_charges.npy must follow the atomic layout with a trailing state axis")
+        if "transition_dipole" in self.arrays:
+            value = self.arrays["transition_dipole"]
+            if value.shape == (self.size, 3):
+                states["transition_dipole"] = 1
+            elif value.ndim == 3 and value.shape[0] == self.size and value.shape[-1] == 3 and value.shape[1] >= 1:
+                states["transition_dipole"] = value.shape[1]
+            else:
+                raise ValueError("transition_dipole.npy shape must be [samples, states, 3] or [samples, 3]")
+        if len(set(states.values())) > 1:
+            raise ValueError("transition_charges and transition_dipole disagree on the number of states")
+        self.num_states = next(iter(states.values()), None)
         for name, reference in (("baseline_energy", "energy"), ("baseline_forces", "forces")):
             if name in self.arrays and self.arrays[name].shape not in shapes[reference]:
                 raise ValueError(f"{name}.npy has invalid shape")
@@ -143,7 +165,7 @@ class NpyDataset(Dataset):
         for name, values in self.arrays.items():
             if name in ("offsets", "mm_offsets"):
                 continue
-            key = atomic if name in ("z", "pos", "forces", "charges", "baseline_forces") else index
+            key = atomic if name in ("z", "pos", "forces", "charges", "baseline_forces", "transition_charges") else index
             if name in ("mm_pos", "mm_charges", "mm_forces", "mm_potential", "mm_potential_gradient", "gas_mm_potential", "gas_mm_potential_gradient", "baseline_mm_forces", "baseline_mm_potential", "baseline_mm_potential_gradient"):
                 key = slice(*self.arrays["mm_offsets"][index:index + 2]) if self.mm_ragged else index
             value = values if name == "z" and not self.ragged and values.ndim == 1 else values[key]
@@ -153,7 +175,9 @@ class NpyDataset(Dataset):
                 sample[name] = sample[name] * self.length_scale
         for name, factor in (("energy", self.energy_scale),
                              ("forces", self.energy_scale / self.length_scale * (-1 if self.gradients else 1)),
-                             ("stress", self.energy_scale / self.length_scale ** 3)):
+                             ("stress", self.energy_scale / self.length_scale ** 3),
+                             # e*length: follows the position conversion so that mu = sum q r holds
+                             ("transition_dipole", self.length_scale)):
             if name in sample:
                 sample[name] = sample[name] * factor
         for name, factor in (("mm_forces", self.energy_scale / self.length_scale * (-1 if self.gradients else 1)),

@@ -98,8 +98,8 @@ class Trainer:
     Both paths define the same loss and gradient.
     """
 
-    PER_STRUCTURE_TARGETS = ("energy", "dipole", "stress")
-    ATOMIC_TARGETS = ("forces", "charges")
+    PER_STRUCTURE_TARGETS = ("energy", "dipole", "stress", "transition_dipole")
+    ATOMIC_TARGETS = ("forces", "charges", "transition_charges")
     MM_TARGETS = ("mm_forces", "mm_potential", "mm_potential_gradient", "gas_mm_potential", "gas_mm_potential_gradient")
 
     def __init__(self, family, model_config, config=None, *, checkpoint=None,
@@ -136,7 +136,7 @@ class Trainer:
         inputs = self.backend.prepare_sample(
             sample, self.config.device, self.config.dtype, model=self.model)
         output = self.backend.forward(self.model, inputs, self.config.loss_weights)
-        errors = {}
+        predictions, targets = {}, {}
         for prop in self.config.loss_weights:
             prediction = output.get(prop)
             if prediction is None:
@@ -144,13 +144,26 @@ class Trainer:
             target = torch.as_tensor(sample[prop], device=self.config.device, dtype=self.config.dtype)
             if prediction.numel() != target.numel():
                 raise ValueError(f"Model output shape {tuple(prediction.shape)} does not match {prop} target {tuple(target.shape)}")
-            errors[prop] = prediction.reshape(target.shape) - target
+            predictions[prop], targets[prop] = prediction.reshape(target.shape), target
+        targets = self._align(predictions, targets)
+        errors = {}
+        for prop in self.config.loss_weights:
+            prediction, target = predictions[prop], targets[prop]
+            errors[prop] = prediction - target
             if not torch.isfinite(errors[prop]).all():
                 raise ValueError(f"Non-finite prediction or target for {prop}")
             if on_prediction is not None:
                 on_prediction(prop, target.detach().cpu().double().numpy(),
-                              prediction.reshape(target.shape).detach().cpu().double().numpy())
+                              prediction.detach().cpu().double().numpy())
         return errors
+
+    def _align(self, predictions, targets):
+        """Optional per-structure label transform before the MSE (e.g. arbitrary
+        sign/phase of excited-state transition properties). Identity by default."""
+        align = getattr(self.backend, "align_targets", None)
+        if align is None:
+            return targets
+        return align(self.model, predictions, targets, dict(self.config.loss_weights))
 
     def _batched_errors(self, samples, on_prediction=None):
         """Per-structure error dicts for several samples from ONE forward pass.
@@ -172,7 +185,7 @@ class Trainer:
         output = self.backend.forward(self.model, inputs, self.config.loss_weights)
         sizes = {"structure": [1] * len(samples), "atoms": list(layout["atoms"]),
                  "mm": None if layout.get("mm") is None else list(layout["mm"])}
-        errors = [{} for _ in samples]
+        rows = [({}, {}) for _ in samples]   # per sample: (predictions, targets)
         for prop in self.config.loss_weights:
             prediction = output.get(prop)
             if prediction is None:
@@ -196,10 +209,17 @@ class Trainer:
                 target = torch.as_tensor(sample[prop], device=self.config.device, dtype=self.config.dtype)
                 if piece.numel() != target.numel():
                     raise ValueError(f"Model output shape {tuple(piece.shape)} does not match {prop} target {tuple(target.shape)}")
-                error = piece.reshape(target.shape) - target
+                rows[row][0][prop], rows[row][1][prop] = piece.reshape(target.shape), target
+        errors = []
+        for predictions, targets in rows:
+            targets = self._align(predictions, targets)
+            row = {}
+            for prop in self.config.loss_weights:
+                error = predictions[prop] - targets[prop]
                 if not torch.isfinite(error).all():
                     raise ValueError(f"Non-finite prediction or target for {prop}")
-                errors[row][prop] = (error, target, piece.reshape(target.shape))
+                row[prop] = (error, targets[prop], predictions[prop])
+            errors.append(row)
         if on_prediction is not None:
             # Same callback order as the per-structure path: sample-major, then target.
             for row in errors:

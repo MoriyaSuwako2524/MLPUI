@@ -18,6 +18,8 @@ OUTPUT_ALIASES = {
     "mm_potential_gradient": ("mm_potential_gradient",),
     "gas_mm_potential": ("gas_mm_potential",),
     "gas_mm_potential_gradient": ("gas_mm_potential_gradient",),
+    "transition_charges": ("transition_charges",),
+    "transition_dipole": ("transition_dipole",),
 }
 
 
