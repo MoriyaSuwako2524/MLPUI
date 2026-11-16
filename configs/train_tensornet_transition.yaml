@@ -14,6 +14,9 @@ model_config:
   cutoff_upper: 5.0
   num_states: 1           # must equal the trailing state axis of the labels
   atomic_dipoles: false   # true: mu = sum q r + sum p_i (when point charges cannot reproduce mu)
+  atom_index_embedding: 0 # N > 0 (>= atoms per structure): learned per-atom-index embedding; needed when the
+                          # molecule has symmetry-equivalent atoms with opposite transition charges.
+                          # Requires the same atom ordering in every frame. See docs/transition-properties.md.
   units: {length: angstrom, charge: e, dipole: e*angstrom}
 training:
   epochs: 300

@@ -5,6 +5,12 @@ Dataset fields (NpyDataset):
                       or ragged [A, n_states]; [.., N] / [A] is accepted when n_states == 1
   transition_dipole   [S_frames, n_states, 3] (or [S_frames, 3] when n_states == 1), e*angstrom
 
+``atom_index_embedding: N`` (N > 0) adds a learned embedding of each atom's index within
+its structure (0..N-1). It breaks permutation invariance on purpose: an invariant per-atom
+scalar head cannot represent transition charges that are antisymmetric under a molecular
+symmetry operation (q_P(i) = -q_i), and is driven to q = 0. Only valid when every structure
+uses the same atom ordering (single-molecule datasets).
+
 Labels may carry an arbitrary sign per (frame, state). The Trainer calls
 ``align_targets`` per structure, which flips each state's label sign to the
 exact minimiser of the weighted MSE (see mlpui.models.transition.phase), so
@@ -36,7 +42,7 @@ class TransitionBackend(ModelBackend):
     def default_config(self):
         return dict(schema_version=1, architecture='tensornet_transition_v1', precision=32,
                     embedding_dimension=128, num_layers=2, num_rbf=32, max_num_neighbors=64,
-                    cutoff_upper=5.0, num_states=1, atomic_dipoles=False,
+                    cutoff_upper=5.0, num_states=1, atomic_dipoles=False, atom_index_embedding=0,
                     units={'length': 'angstrom', 'charge': 'e', 'dipole': 'e*angstrom'})
 
     def _config(self, supplied):
@@ -57,6 +63,9 @@ class TransitionBackend(ModelBackend):
             raise ValueError('cutoff_upper must be finite and positive')
         if type(config['atomic_dipoles']) is not bool:
             raise ValueError('atomic_dipoles must be boolean')
+        if type(config['atom_index_embedding']) is not int or config['atom_index_embedding'] < 0:
+            raise ValueError('atom_index_embedding must be a non-negative integer (0 disables it; '
+                             'otherwise the maximum number of atoms per structure)')
         if config['units'] != {'length': 'angstrom', 'charge': 'e', 'dipole': 'e*angstrom'}:
             raise ValueError('Transition model requires angstrom / e / e*angstrom after dataset conversion')
         return config

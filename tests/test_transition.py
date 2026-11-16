@@ -213,3 +213,113 @@ def test_rejects_environment_and_unknown_targets():
         be.configure_targets(dict(SMALL), {'energy': 1.0})
     with pytest.raises(ValueError, match='Unknown transition config'):
         be.build_model(dict(SMALL, foo=1))
+
+
+# ---- atom_index_embedding: symmetric molecules with antisymmetric transition charges ----------
+ETHYLENE_Z = np.array([6, 6, 1, 1, 1, 1])
+ETHYLENE = np.array([[-0.667, 0.0, 0.0], [0.667, 0.0, 0.0],
+                     [-1.232, 0.923, 0.0], [-1.232, -0.923, 0.0],
+                     [1.232, 0.923, 0.0], [1.232, -0.923, 0.0]])
+MIRROR = np.array([1, 0, 4, 5, 2, 3])       # x -> -x maps atom i onto atom MIRROR[i]
+SYM = dict(precision=64, embedding_dimension=16, num_layers=1, num_rbf=8, cutoff_upper=4.0, num_states=1)
+
+
+def antisymmetric_labels(pos):
+    """q_i = 0.3 (r_i - centre) . u with u along C0->C1: antisymmetric under the mirror, sum q = 0."""
+    u = (pos[1] - pos[0]) / np.linalg.norm(pos[1] - pos[0])
+    return 0.3 * (pos - pos.mean(0)) @ u
+
+
+def ethylene_dataset(directory, seeds, noise=0.005):
+    # Small distortions: with large ones an invariant model can partly fake the antisymmetry
+    # through the phase-less loss (it picks "which side is positive" from the distortion).
+    pos, q = [], []
+    for k in seeds:
+        rng = np.random.default_rng(k)
+        p = ETHYLENE + rng.normal(scale=noise, size=ETHYLENE.shape)
+        p = (torch.tensor(p) @ rotation(1000 + k).T).numpy()
+        pos.append(p)
+        q.append(antisymmetric_labels(p))
+    directory.mkdir(parents=True, exist_ok=True)
+    np.save(directory / 'z.npy', ETHYLENE_Z)
+    np.save(directory / 'pos.npy', np.stack(pos))
+    np.save(directory / 'transition_charges.npy', np.stack(q))
+    return NpyDataset(directory)
+
+
+def random_model(config, seed=0):
+    torch.manual_seed(seed)
+    m = get_backend('transition').build_model(config)
+    with torch.no_grad():
+        for p in m.parameters():
+            p.normal_(0, 0.3)
+    return m.eval()
+
+
+def test_invariant_model_cannot_separate_mirror_atoms_but_index_embedding_can():
+    plain = random_model(dict(SYM))
+    q = run(plain, ETHYLENE, ETHYLENE_Z)['transition_charges'][:, 0]
+    assert torch.allclose(q, q[MIRROR], atol=1e-10)          # q_P(i) = q_i is forced
+    indexed = random_model(dict(SYM, atom_index_embedding=6))
+    q = run(indexed, ETHYLENE, ETHYLENE_Z)['transition_charges'][:, 0]
+    assert (q - q[MIRROR]).abs().max() > 1e-3
+    assert abs(float(q.sum())) < 1e-12
+
+
+def test_index_embedding_starts_as_plain_model_and_keeps_o3_invariance():
+    plain = random_model(dict(SYM, atomic_dipoles=True), seed=4)
+    indexed = get_backend('transition').build_model(dict(SYM, atomic_dipoles=True, atom_index_embedding=8))
+    state = dict(plain.state_dict(), **{'index_embedding.weight': indexed.state_dict()['index_embedding.weight']})
+    indexed.load_state_dict(state)
+    assert torch.count_nonzero(indexed.index_embedding.weight) == 0
+    pos = geometry(3)
+    a, b = run(plain, pos), run(indexed.eval(), pos)
+    assert torch.allclose(a['transition_charges'], b['transition_charges'], atol=1e-12)
+    m = random_model(dict(SYM, atomic_dipoles=True, atom_index_embedding=8), seed=5)
+    out = run(m, pos)
+    for reflect in (False, True):
+        R = rotation(6, reflect)
+        rot = run(m, (torch.tensor(pos) @ R.T).numpy())
+        assert torch.allclose(rot['transition_charges'], out['transition_charges'], atol=1e-9)
+        assert torch.allclose(rot['transition_dipole'], out['transition_dipole'] @ R.T, atol=1e-9)
+
+
+def test_index_embedding_batched_matches_single():
+    m = random_model(dict(SYM, num_states=S, atom_index_embedding=8), seed=7)
+    be = get_backend('transition')
+    samples = [dict(z=Z, pos=geometry(k), charge=np.array(0.)) for k in range(3)]
+    samples[1] = dict(z=Z[:5], pos=geometry(9)[:5], charge=np.array(0.))
+    inputs, layout = be.prepare_batch(samples, 'cpu', torch.float64, model=m)
+    out = be.forward(m, inputs, ('transition_charges', 'transition_dipole'))
+    qs = torch.split(out['transition_charges'], layout['atoms'])
+    for k, s in enumerate(samples):
+        ref = run(m, s['pos'], s['z'])
+        assert torch.allclose(qs[k], ref['transition_charges'], atol=1e-10)
+        assert torch.allclose(out['transition_dipole'][k], ref['transition_dipole'], atol=1e-10)
+
+
+def test_index_embedding_validation():
+    be = get_backend('transition')
+    for bad in (-1, 2.0, True):
+        with pytest.raises(ValueError, match='atom_index_embedding'):
+            be.build_model(dict(SYM, atom_index_embedding=bad))
+    m = random_model(dict(SYM, atom_index_embedding=4))
+    with pytest.raises(ValueError, match='atom_index_embedding is 4'):
+        run(m, ETHYLENE, ETHYLENE_Z)
+    assert be.build_model(dict(SYM)).index_embedding is None    # default off: old configs unchanged
+    assert 'index_embedding.weight' not in be.build_model(dict(SYM)).state_dict()
+
+
+def test_index_embedding_learns_antisymmetric_charges(tmp_path):
+    train = ethylene_dataset(tmp_path / 'train', range(32))
+    val = ethylene_dataset(tmp_path / 'val', range(100, 116))
+    label_rms = float(np.sqrt(np.mean(np.load(tmp_path / 'val' / 'transition_charges.npy') ** 2)))
+    rmse = {}
+    for n in (0, 6):
+        cfg = TrainingConfig(epochs=40, batch_size=8, learning_rate=5e-3, dtype=torch.float64, seed=0,
+                             loss_weights={'transition_charges': 1.0}, early_stopping=False)
+        tr = Trainer('transition', dict(SYM, atom_index_embedding=n), cfg)
+        tr.fit(train, val, output_dir=tmp_path / f'run{n}')
+        rmse[n] = tr.evaluate(val)['metrics']['transition_charges']['rmse']
+    assert rmse[0] > 0.8 * label_rms, (rmse, label_rms)     # invariant model stuck near q = 0
+    assert rmse[6] < 0.3 * label_rms, (rmse, label_rms)

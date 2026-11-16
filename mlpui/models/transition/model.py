@@ -15,6 +15,12 @@ transition charges q_i^(n) and the transition dipole
   arbitrary sign s_n = +-1 of state n flips both together. Training resolves
   that sign per (structure, state) in the loss; see mlpui.models.transition.phase.
 
+* Optional atom-index embedding (``atom_index_embedding: N``): a learned vector per
+  within-structure atom index (0..N-1) is added to the TensorNet features before the heads.
+  Symmetry-equivalent atoms of a symmetric molecule have identical invariant features, so
+  without it q_P(i) = q_i is forced and antisymmetric transition charges collapse to 0.
+  Requires a fixed atom ordering across structures; zero-initialised.
+
 Representation: QM-only O(3) TensorNet (scalar features, invariant under
 reflection). Units: angstrom, e, e*angstrom. Nonperiodic. Gas phase only.
 """
@@ -44,6 +50,11 @@ class TransitionTensorNet(nn.Module):
             hidden_channels=width, num_layers=config['num_layers'], num_rbf=config['num_rbf'],
             max_num_neighbors=config['max_num_neighbors'], cutoff_upper=config['cutoff_upper'],
             static_shapes=False, equivariance_invariance_group='O(3)', dtype=dtype)
+        self.index_embedding = None
+        if config.get('atom_index_embedding', 0):
+            self.index_embedding = nn.Embedding(config['atom_index_embedding'], width, dtype=dtype)
+            # Zero init: training starts from the permutation-invariant model.
+            nn.init.zeros_(self.index_embedding.weight)
         self.charge_head = nn.Sequential(nn.Linear(width, width, dtype=dtype), nn.SiLU(),
                                          nn.Linear(width, states, dtype=dtype))
         if config['atomic_dipoles']:
@@ -58,6 +69,9 @@ class TransitionTensorNet(nn.Module):
 
     def __setstate__(self, state):
         super().__setstate__(state)
+        if 'index_embedding' not in self._modules:   # serialized before atom_index_embedding existed
+            self.index_embedding = None
+            self.config.setdefault('atom_index_embedding', 0)
         if self.config.get('architecture') != self.ARCHITECTURE or self.transition_schema.item() != 1:
             raise ValueError('Incompatible transition-property serialized architecture')
 
@@ -79,6 +93,17 @@ class TransitionTensorNet(nn.Module):
         vec = pos[j] - pos[i]                                             # [E, 3]
         return segment_sum(w[:, :, None] * vec[:, None, :], i, len(pos))  # [A, S, 3]
 
+    def _atom_index(self, batch, counts):
+        """Index of each atom within its own structure (atoms of a structure are contiguous)."""
+        if len(batch) > 1 and bool((batch[1:] < batch[:-1]).any()):
+            raise ValueError('atom_index_embedding requires the atoms of each structure to be contiguous')
+        start = torch.cumsum(counts, 0) - counts
+        index = torch.arange(len(batch), device=batch.device) - start[batch]
+        limit = self.index_embedding.num_embeddings
+        if len(index) and int(index.max()) >= limit:
+            raise ValueError(f'Structure has {int(counts.max())} atoms but atom_index_embedding is {limit}')
+        return index
+
     def forward(self, z, pos, charge=None, *, batch=None,
                 properties=('transition_charges', 'transition_dipole')):
         single = batch is None
@@ -91,8 +116,11 @@ class TransitionTensorNet(nn.Module):
         if charge.numel() != count:
             raise ValueError('Supply one total QM charge per structure')
         x, _, _, _, _ = self.representation(z, pos, batch, q=charge)
+        counts = torch.bincount(batch, minlength=count)
+        if self.index_embedding is not None:
+            x = x + self.index_embedding(self._atom_index(batch, counts))
         raw = self.charge_head(x)                                          # [A, S]
-        atoms = torch.bincount(batch, minlength=count).to(raw.dtype)
+        atoms = counts.to(raw.dtype)
         mean = segment_sum(raw, batch, count) / atoms[:, None]
         q = raw - mean[batch]                                              # sum_i q_i = 0 per structure/state
         result = {'transition_charges': q}

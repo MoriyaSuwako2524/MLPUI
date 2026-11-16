@@ -23,6 +23,33 @@ cosine cutoff, last layer zero-initialised, i.e. training starts from the
 pure point-charge dipole). Use it when the charge labels cannot reproduce the
 QM transition dipole (e.g. Mulliken/Löwdin transition charges).
 
+### Symmetric molecules: `atom_index_embedding`
+
+The representation and heads are permutation equivariant and O(3) invariant, so
+two atoms related by a symmetry operation of the molecule (`P(i)`) always get the
+same predicted scalar: `q̂_P(i) = q̂_i`. Transition charges of a state whose
+symmetry differs from the ground state are instead antisymmetric,
+`q_P(i) = −q_i` (e.g. the short-axis-polarised transition of anthracene). The
+best an invariant model can do is then `q̂ = 0`, and the loss stalls at the label
+variance (training loss can still drop by memorising thermal distortions, while
+validation gets worse). Making the network equivariant internally or allowing
+pseudoscalar outputs does not help: the molecular C2 rotation is a proper rotation, and
+a planar molecule's own mirror plane maps every atom onto itself. The per-frame phase-less
+sign cannot fix it either, because it flips all atoms together. (With the phase-less
+loss and large thermal distortions an invariant model can partly fake the antisymmetry by
+choosing "which side is positive" from the distortion; that function is discontinuous near
+the symmetric geometry and generalises poorly. In a test on distorted ethylene the plain
+model's validation RMSE was 0.38 / 0.78 / 0.99 of the label RMS for 0.05 / 0.02 / 0.005 Å
+distortions, vs 0.07 / 0.03 / 0.006 with the index embedding.)
+
+`atom_index_embedding: N` adds a learned vector per within-structure atom index
+(0..N−1, N ≥ atoms per structure) to the TensorNet features before the heads
+(zero-initialised). This breaks permutation symmetry on purpose, so it is valid
+only when every frame uses the same atom ordering (single-molecule datasets); the
+phase convention ("which side is positive") is then the one carried by the labels.
+Rotation/translation invariance of q and equivariance of μ are unchanged.
+`0` (default) disables it and keeps old configs and checkpoints valid.
+
 Outputs: `transition_charges [A, S]`, `transition_dipole [B, S, 3]`
 (`[S, 3]` for one structure), and `transition_atomic_dipoles [A, S, 3]` when enabled.
 The model is gas phase only (MM fields are rejected) and nonperiodic.
