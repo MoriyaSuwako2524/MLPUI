@@ -1,0 +1,24 @@
+Model-driven QM/MM umbrella sampling, htdlh Cys121->His202 PT (UMA+QEq+dMLP via QMHub mlpui engine), SINR NVT
+ &cntrl
+  imin=0, irest=1, ntx=5, ntb=1, ntp=0, nscm=0,
+  ntt=12, gamma_ln=1.0, temp0=300.0, ig=-1, nkija=4, sinrtau=0.05,
+  cut=10.0, nstlim=10000, dt=0.001, ntc=1, ntf=1, tol=0.000001,
+  ntpr=100, ntwx=20, ntwr=1000, ntxo=2, ioutfm=1, iwrap=1,
+  watnam='WAT', owtnm='O', nmropt=1, ifqnt=1,
+ /
+ &ewald
+  dsum_tol=0.000001,
+ /
+ &qmmm
+  qmmask="(:121,202,170&!@N,HN,CA,HA,C,O)|(:PET)", qm_theory='EXTERN', qmcharge=-1, qmshake=0,
+  qmcut=999.0, qm_ewald=0, qm_pme=0, qmmm_switch=0, writepdb=0,
+ /
+ &qmhub
+  config="qmhub_mlp.ini",
+  basedir="qmhub",
+  comm=2,
+ /
+ &wt type='DUMPFREQ', istep1=1 /
+ &wt type='END' /
+ DISANG=cv.rst
+ DUMPAVE=mlmd.cv

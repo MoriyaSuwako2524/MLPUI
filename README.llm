@@ -4,10 +4,13 @@
 # MLPUI: full reference (for LLMs)
 
 Read this whole file before answering questions about MLPUI or changing its code.
-Then read the topic document in `docs/` that matches the task:
+Then read the topic document in `docs/` that matches the task.
+For any QM/MM or ML/MM task (labels, training, MD with QMHub), start with docs/mlmm-workflow.md:
 
 | Topic | Document | Example config |
 | --- | --- | --- |
+| **ML/MM end to end: `.nc` -> QMHub replay -> Q-Chem labels -> dataset -> training -> model bundle -> sander+QMHub ML/MM MD** | docs/mlmm-workflow.md | examples/mlmm_htdlh/ |
+| Composite QM/MM potentials (`mlpui.potentials`, spec JSON) and the QMHub `mlpui` engine | docs/qmhub-engine.md | examples/mlmm_htdlh/bundle/, examples/mlmm_htdlh/md/ |
 | Adding / changing a model backend, checkpoint contract | docs/model-backends.md | |
 | UMA inference and NVT MD | docs/uma.md, docs/uma-prediction.md | |
 | MACE | docs/mace.md | configs/train_mace.yaml |

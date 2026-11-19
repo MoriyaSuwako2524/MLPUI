@@ -1,0 +1,3 @@
+#!/bin/bash
+# stand-in for 'qchem -nt N qchem.inp qchem.out save' used only to capture QMHub's embedding
+exec /scratch/moriya/python/my_env/qmhub-mlpui/bin/python /scratch/moriya/htdlh_labels_v1/tools/fake_qchem.py "$@"

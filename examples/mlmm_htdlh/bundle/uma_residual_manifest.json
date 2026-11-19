@@ -1,0 +1,47 @@
+{
+ "definition": "energy/forces = QMMM label - E_UMA(uma-s-1p2, omol, charge -1 (per-frame charge.npy), spin 1) - E_charge(QEq best.pt) - energy_offset; mm_potential(_gradient) as residual v1 (UMA has no MM dependence)",
+ "energy_offset_eV": -0.02732889703321708,
+ "offset_definition": "mean over train of (E_gas B3LYP-D3(BJ)/6-31G* - E_UMA)",
+ "uma_checkpoint": "/home/moriya2524/mlp/sources/UMA/UMA/checkpoints/uma-s-1p2.pt",
+ "uma_checkpoint_sha256": "ba5c0d912efa22dc238e5fb1b5b7f66ee2e68c48c1b95b7cfd7fe1da5938398b",
+ "qeq_residual_source": "/scratch/moriya2524/htdlh_qeq_residual_b3lyp_qc63_s42",
+ "qeq_residual_manifest": "4468351d69d9b862cfdbc2044a1402da4c1d716855a7d7f1188ced52ed23fda1",
+ "stats": {
+  "train": {
+   "gas_minus_uma_energy_std": 0.0870671496949891,
+   "gas_minus_uma_energy_rmse_after_offset": 0.0870671496949891,
+   "gas_minus_uma_force_rms": 0.2110793187813043,
+   "residual_v2_energy_rms": 0.10177695117427173,
+   "residual_v2_force_rms": 0.21870309804770727,
+   "residual_v1_energy_rms": 0.055360848040335066,
+   "residual_v1_force_rms": 0.06030791152440124
+  },
+  "validation": {
+   "gas_minus_uma_energy_std": 0.08625477115933256,
+   "gas_minus_uma_energy_rmse_after_offset": 0.08661250670724874,
+   "gas_minus_uma_force_rms": 0.20914025240256273,
+   "residual_v2_energy_rms": 0.11257196700095264,
+   "residual_v2_force_rms": 0.21732203799519337,
+   "residual_v1_energy_rms": 0.07658226921805589,
+   "residual_v1_force_rms": 0.06126103458328989
+  },
+  "test": {
+   "gas_minus_uma_energy_std": 0.08399442430382421,
+   "gas_minus_uma_energy_rmse_after_offset": 0.08471310507222081,
+   "gas_minus_uma_force_rms": 0.20866218098619677,
+   "residual_v2_energy_rms": 0.11624645763662572,
+   "residual_v2_force_rms": 0.2170037403441503,
+   "residual_v1_energy_rms": 0.0738007696203499,
+   "residual_v1_force_rms": 0.061742853182381305
+  },
+  "guard": {
+   "gas_minus_uma_energy_std": 0.08750266793664571,
+   "gas_minus_uma_energy_rmse_after_offset": 0.0878414552210638,
+   "gas_minus_uma_force_rms": 0.20890339854512116,
+   "residual_v2_energy_rms": 0.11925248966806719,
+   "residual_v2_force_rms": 0.21741486432692736,
+   "residual_v1_energy_rms": 0.0738644554777739,
+   "residual_v1_force_rms": 0.06198146973908709
+  }
+ }
+}

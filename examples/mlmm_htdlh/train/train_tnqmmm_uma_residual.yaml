@@ -1,0 +1,37 @@
+family: tensornet_qmmm
+model_config:
+  schema_version: 2
+  architecture: tensornet_ext_v1
+  precision: 32
+  embedding_dimension: 128
+  num_layers: 2
+  num_rbf: 32
+  max_num_neighbors: 64
+  cutoff_upper: 4.5
+  environment_cutoff: 10.0
+  environment_mode: fixed_reference_selection
+  ext_num_rbf: 32
+  ext_rbf_type: expnorm
+  ext_trainable_rbf: false
+  ext_cutoff_lower: 0.0
+  ext_cutoff_upper: 10.0
+  units: {length: angstrom, energy: eV, charge: e}
+  baseline: {mode: residual_only}
+training:
+  epochs: 150
+  batch_size: 16
+  eval_batch_size: 16
+  validation_interval: 2
+  learning_rate: 0.0005
+  dtype: float32
+  device: cuda
+  seed: 42
+  loss_weights: {energy: 2.0, forces: 2.0, mm_potential: 10.0, mm_potential_gradient: 20.0}
+  early_stopping: true
+  early_stopping_patience: 8
+  save_interval: 20
+train:
+  directory: /scratch/moriya2524/htdlh_qeq_uma_residual_b3lyp_qc63_s42/train
+validation:
+  directory: /scratch/moriya2524/htdlh_qeq_uma_residual_b3lyp_qc63_s42/validation
+output_dir: /home/moriya2524/mlp/runs/htdlh_qeq_b3lyp_v1/tnqmmm_uma_residual_s42

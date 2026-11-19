@@ -1,0 +1,29 @@
+{
+ "name": "htdlh_full",
+ "device": "cpu",
+ "dtype": "float32",
+ "charge": -1,
+ "spin": 1,
+ "terms": [
+  {
+   "type": "uma",
+   "checkpoint": "models/uma-s-1p2.pt",
+   "implementation": "native"
+  },
+  {
+   "type": "constant",
+   "name": "offset",
+   "manifest": "models/uma_residual_manifest.json"
+  },
+  {
+   "type": "mlpui",
+   "name": "qeq",
+   "checkpoint": "models/qeq_best.pt"
+  },
+  {
+   "type": "mlpui",
+   "name": "dmlp",
+   "checkpoint": "models/dmlp_best.pt"
+  }
+ ]
+}

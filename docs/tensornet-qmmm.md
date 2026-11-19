@@ -5,7 +5,9 @@ It follows [panxl/torchmd-net at b0f7c7b](https://github.com/panxl/torchmd-net/t
 Legacy schema-1 checkpoints are rejected with an architecture-incompatibility
 error, including direct non-strict state loading. Existing files are not changed.
 The historical model is separately available as [`tensornet-ext`](tensornet-legacy-comparison.md); it does not change this schema2 implementation.
-This is a finite, nonperiodic residual adaptation; there is no QM/MM-AC or MD adapter.
+This is a finite, nonperiodic residual adaptation. The backend itself has no ASE/MD adapter;
+ML/MM MD runs through sander + QMHub with the composite-potential engine described in
+[qmhub-engine.md](qmhub-engine.md) (end-to-end guide: [mlmm-workflow.md](mlmm-workflow.md)).
 
 ## Energy and baseline semantics
 
@@ -200,8 +202,9 @@ prediction arrays are not charge-model weights. Real-data use requires
 frame matching, unit, gas-model identity and embedded energy/self-energy checks.
 
 Web training and evaluation support dual-region uploads/imports, splitting and
-parity/artifact export. ASE/MD remains unsupported. MD also requires online providers, environment/cache
-updates, smooth dynamic selection, full force composition and conservation tests.
+parity/artifact export. The backend's ASE calculator path remains unsupported. MD uses
+`mlpui.potentials` (online UMA + QEq + residual terms composed per call) behind QMHub,
+which supplies the dynamic embedding; see [qmhub-engine.md](qmhub-engine.md).
 
 Acceptance tests: `python -m pytest tests/test_qmmm.py -q`. They cover ragged and
 empty regions, O(3), coordinate/charge finite differences, derivative-loss

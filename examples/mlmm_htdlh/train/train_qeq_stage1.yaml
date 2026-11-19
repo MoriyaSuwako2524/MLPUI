@@ -1,0 +1,32 @@
+family: qeq_charge
+model_config:
+  schema_version: 1
+  architecture: qeq_tensornet_v1
+  precision: 32
+  embedding_dimension: 64
+  num_layers: 2
+  num_rbf: 32
+  max_num_neighbors: 64
+  cutoff_upper: 5.0
+  sigma_bounds: [0.3, 1.2]
+  hardness_bounds: [2.0, 40.0]
+  units: {length: angstrom, energy: eV, charge: e}
+  baseline: {mode: residual_only}
+training:
+  epochs: 200
+  batch_size: 32
+  eval_batch_size: 64
+  validation_interval: 2
+  learning_rate: 0.001
+  dtype: float32
+  device: cuda
+  seed: 42
+  loss_weights: {energy: 10.0, forces: 4.0, mm_potential: 300.0, mm_potential_gradient: 100.0, gas_mm_potential: 300.0, gas_mm_potential_gradient: 100.0}
+  early_stopping: true
+  early_stopping_patience: 8
+  save_interval: 20
+train:
+  directory: /scratch/moriya2524/qeq_stage1_b3lyp_qc63_v1/train
+validation:
+  directory: /scratch/moriya2524/qeq_stage1_b3lyp_qc63_v1/validation
+output_dir: /home/moriya2524/mlp/runs/htdlh_qeq_b3lyp_v1/qeq_stage1_s42
