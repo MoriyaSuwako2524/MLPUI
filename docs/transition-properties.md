@@ -82,3 +82,38 @@ near-degenerate / conical-intersection frames (no globally smooth sign exists),
 state–state (m, n ≥ 1) properties whose sign is s_m·s_n.
 
 Example config: `configs/train_tensornet_transition.yaml`. Tests: `tests/test_transition.py`.
+
+## Global heads for chromophores
+
+A purely local per-atom head cannot make all atoms agree on molecule-level state mixing
+(which configurations contribute to state n). Two optional heads add it; both require
+`atom_index_embedding` (fixed atom ordering) and are mutually exclusive.
+
+### `global_basis: M`
+
+q_i^(n) += Σ_a C_na(R) b_a(i): M learned per-atom-index basis vectors b_a (+ a zero-initialised
+local correction) mixed by coefficients C(R) [S, M] read out from attention-pooled atom
+features. `model.init_global_basis(b)` sets b [N, M], e.g. from a sign-invariant PCA of the
+training labels.
+
+### `diabatic_states: M` (M ≥ num_states) and target `excitation_energies`
+
+A symmetric M × M diabatic Hamiltonian is built from atomic contributions,
+H(R) = diag(ε⁰) + Σ_i h_i(x_i), and diagonalised, H = U diag(E) Uᵀ. The lowest S eigenvalues
+are predicted as `excitation_energies` [S] (eV after dataset conversion), and
+q_i^(n) = Σ_a U_an b_a(i). Mixing near avoided crossings then follows the energies; eigenvector
+signs are arbitrary and absorbed by the phase-less loss; M > S leaves room for higher states.
+The eigen-decomposition backward replaces 1/(E_j − E_i) by a Lorentzian-broadened
+d/(d² + ε²) (`TransitionTensorNet.EIG_BROADENING`, default 0.01) so near-degenerate spectra
+keep finite gradients. `model.init_diabatic(b, eps0)` sets the basis [N, M] and energies [M]
+(e.g. per-state sign-aligned label templates and mean excitation energies).
+
+Dataset field: `excitation_energies.npy` `[frames, S]` (or `[frames]` if S = 1), energy unit,
+scaled with `energy_scale`; it must agree with the other transition fields on S. Training it
+requires `diabatic_states > 0`.
+
+Observed on TDA/PBE0 labels of three dyes (BODIPY, PHBDI, rhodamine; 2400 training frames,
+cutoff 8 Å, 3 layers, 3-seed ensembles): the diabatic head (M = 6–8) lowered transition-charge
+test RMSE by 20–41 % relative to the local head, and supervising excitation energies lowered it
+further for every molecule and both M tested. Tests: `tests/test_transition_global.py`,
+`tests/test_transition_diabatic.py`.

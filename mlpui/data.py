@@ -19,7 +19,9 @@ class NpyDataset(Dataset):
                # gas-phase (unpolarized) QM ESP and its gradient at the same MM sites
                "gas_mm_potential", "gas_mm_potential_gradient",
                # excited-state 0->n transition properties, trailing state axis (sign per state is arbitrary)
-               "transition_charges", "transition_dipole")
+               "transition_charges", "transition_dipole",
+               # excitation energies E_n - E_0 [samples, states] (energy unit), same state axis
+               "excitation_energies")
     mm_fields = ("mm_pos", "mm_charges", "mm_offsets")
     baseline_fields = ("baseline_energy", "baseline_forces", "baseline_mm_forces", "baseline_mm_potential", "baseline_mm_potential_gradient")
 
@@ -107,6 +109,14 @@ class NpyDataset(Dataset):
                 states["transition_dipole"] = value.shape[1]
             else:
                 raise ValueError("transition_dipole.npy shape must be [samples, states, 3] or [samples, 3]")
+        if "excitation_energies" in self.arrays:
+            value = self.arrays["excitation_energies"]
+            if value.shape == (self.size,):
+                states["excitation_energies"] = 1
+            elif value.ndim == 2 and value.shape[0] == self.size and value.shape[1] >= 1:
+                states["excitation_energies"] = value.shape[1]
+            else:
+                raise ValueError("excitation_energies.npy shape must be [samples, states] or [samples]")
         if len(set(states.values())) > 1:
             raise ValueError("transition_charges and transition_dipole disagree on the number of states")
         self.num_states = next(iter(states.values()), None)
@@ -173,7 +183,7 @@ class NpyDataset(Dataset):
         for name in ("pos", "cell", "mm_pos"):
             if name in sample:
                 sample[name] = sample[name] * self.length_scale
-        for name, factor in (("energy", self.energy_scale),
+        for name, factor in (("energy", self.energy_scale), ("excitation_energies", self.energy_scale),
                              ("forces", self.energy_scale / self.length_scale * (-1 if self.gradients else 1)),
                              ("stress", self.energy_scale / self.length_scale ** 3),
                              # e*length: follows the position conversion so that mu = sum q r holds

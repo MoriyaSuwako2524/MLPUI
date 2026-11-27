@@ -98,7 +98,7 @@ class Trainer:
     Both paths define the same loss and gradient.
     """
 
-    PER_STRUCTURE_TARGETS = ("energy", "dipole", "stress", "transition_dipole")
+    PER_STRUCTURE_TARGETS = ("energy", "dipole", "stress", "transition_dipole", "excitation_energies")
     ATOMIC_TARGETS = ("forces", "charges", "transition_charges")
     MM_TARGETS = ("mm_forces", "mm_potential", "mm_potential_gradient", "gas_mm_potential", "gas_mm_potential_gradient")
 
