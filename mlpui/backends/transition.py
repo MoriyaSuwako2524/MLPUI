@@ -31,7 +31,7 @@ class TransitionBackend(ModelBackend):
     label = 'TensorNet transition charges / dipoles'
     web_supported = False
     supports_evaluation_artifacts = False
-    training_targets = ('transition_charges', 'transition_dipole')
+    training_targets = ('transition_charges', 'transition_dipole', 'excitation_energies')
     supports_batching = True
 
     def metadata(self):
@@ -43,6 +43,7 @@ class TransitionBackend(ModelBackend):
         return dict(schema_version=1, architecture='tensornet_transition_v1', precision=32,
                     embedding_dimension=128, num_layers=2, num_rbf=32, max_num_neighbors=64,
                     cutoff_upper=5.0, num_states=1, atomic_dipoles=False, atom_index_embedding=0,
+                    global_basis=0, diabatic_states=0,
                     units={'length': 'angstrom', 'charge': 'e', 'dipole': 'e*angstrom'})
 
     def _config(self, supplied):
@@ -66,6 +67,19 @@ class TransitionBackend(ModelBackend):
         if type(config['atom_index_embedding']) is not int or config['atom_index_embedding'] < 0:
             raise ValueError('atom_index_embedding must be a non-negative integer (0 disables it; '
                              'otherwise the maximum number of atoms per structure)')
+        if type(config['global_basis']) is not int or config['global_basis'] < 0:
+            raise ValueError('global_basis must be a non-negative integer (0 disables it)')
+        if type(config['diabatic_states']) is not int or config['diabatic_states'] < 0:
+            raise ValueError('diabatic_states must be a non-negative integer (0 disables it)')
+        if config['diabatic_states']:
+            if not config['atom_index_embedding']:
+                raise ValueError('diabatic_states requires atom_index_embedding (fixed atom ordering)')
+            if config['diabatic_states'] < config['num_states']:
+                raise ValueError('diabatic_states must be >= num_states')
+            if config['global_basis']:
+                raise ValueError('diabatic_states and global_basis are mutually exclusive')
+        if config['global_basis'] and not config['atom_index_embedding']:
+            raise ValueError('global_basis requires atom_index_embedding (fixed atom ordering)')
         if config['units'] != {'length': 'angstrom', 'charge': 'e', 'dipole': 'e*angstrom'}:
             raise ValueError('Transition model requires angstrom / e / e*angstrom after dataset conversion')
         return config
@@ -73,7 +87,10 @@ class TransitionBackend(ModelBackend):
     def configure_targets(self, config, targets):
         if set(targets) - set(self.training_targets):
             raise ValueError(f'Unsupported transition target: {set(targets) - set(self.training_targets)}')
-        return self._config(config)
+        config = self._config(config)
+        if 'excitation_energies' in targets and not config['diabatic_states']:
+            raise ValueError('excitation_energies is predicted only by the diabatic head (diabatic_states > 0)')
+        return config
 
     def training_config(self, config, targets, dtype):
         config = self.configure_targets(config, targets)
